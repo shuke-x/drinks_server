@@ -1,0 +1,2 @@
+import { DataSource } from 'typeorm'; import { Cocktail } from '../modules/cocktails/entities/cocktail.entity';
+export default new DataSource({type:'postgres',host:process.env.DB_HOST??'localhost',port:Number(process.env.DB_PORT??5432),username:process.env.DB_USER??'drinks',password:process.env.DB_PASS??'drinks',database:process.env.DB_NAME??'tonight_drinks',entities:[Cocktail],migrations:['migrations/*.ts']});
