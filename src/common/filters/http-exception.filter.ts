@@ -1,3 +1,46 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
-import { BusinessException, ErrorCode } from '../constants/error-code';
-@Catch() export class AllExceptionFilter implements ExceptionFilter { catch(error: unknown, host: ArgumentsHost) { const res=host.switchToHttp().getResponse(); if(error instanceof BusinessException) return res.status(200).json({code:error.code,message:error.message,data:null}); if(error instanceof HttpException){const status=error.getStatus(); const raw:any=error.getResponse(); const validation=status===400; const msg=Array.isArray(raw?.message)?raw.message.join('; '):(raw?.message??error.message); return res.status(status).json({code:validation?ErrorCode.VALIDATION:status===404?ErrorCode.NOT_FOUND:status===409?ErrorCode.CONFLICT:status,message:msg,data:null});} return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({code:ErrorCode.INTERNAL,message:'Internal server error',data:null}); } }
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+} from "@nestjs/common";
+import { BusinessException, ErrorCode } from "../constants/error-code";
+@Catch()
+export class AllExceptionFilter implements ExceptionFilter {
+  catch(error: unknown, host: ArgumentsHost) {
+    const res = host.switchToHttp().getResponse();
+    if (error instanceof BusinessException)
+      return res
+        .status(200)
+        .json({ code: error.code, message: error.message, data: null });
+    if (error instanceof HttpException) {
+      const status = error.getStatus();
+      const raw: any = error.getResponse();
+      const validation = status === 400;
+      const msg = Array.isArray(raw?.message)
+        ? raw.message.join("; ")
+        : (raw?.message ?? error.message);
+      return res
+        .status(status)
+        .json({
+          code: validation
+            ? ErrorCode.VALIDATION
+            : status === 404
+              ? ErrorCode.NOT_FOUND
+              : status === 409
+                ? ErrorCode.CONFLICT
+                : status,
+          message: msg,
+          data: null,
+        });
+    }
+    return res
+      .status(HttpStatus.INTERNAL_SERVER_ERROR)
+      .json({
+        code: ErrorCode.INTERNAL,
+        message: "Internal server error",
+        data: null,
+      });
+  }
+}

@@ -7,7 +7,42 @@
 - Swagger：`http://localhost:3000/docs`
 - 请求与响应编码：`UTF-8`
 - JSON 字段命名：`camelCase`
-- 当前版本不需要登录，也不需要携带 Token。
+- 用户、收藏接口需要登录；其余酒单接口仍可匿名访问。
+
+## 认证与用户
+
+认证接口使用一次性 RSA-OAEP(SHA-256) challenge，避免密码以明文 JSON 形式进入业务请求。HTTPS 仍然是必须的；RSA 不是 TLS 的替代品。
+
+1. `GET /api/v1/auth/challenge` 返回 `challengeId`、PEM `publicKey`、`nonce` 与 `expiresAt`（2 分钟）。
+2. 注册时将 `{ email, password, name?, code? }`（登录时为 `{ email, password }`）序列化为 UTF-8 JSON，以该公钥 RSA-OAEP SHA-256 加密并 Base64 编码。`code` 是为后续邀请码/验证码流程预留的可选字段，当前不校验。
+3. 发送 `{ "challengeId":"…", "ciphertext":"…" }` 至 `POST /api/v1/auth/register` 或 `/login`。
+
+challenge 为一次性且有效期为两分钟，服务端会原子消费它，重复提交会失败。注册密码必须至少 8 位，且含大写、小写、数字、标点。服务端仅保存 Argon2id 哈希。
+
+成功登录/注册返回：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": { "accessToken": "…", "refreshToken": "…", "expiresIn": 900 }
+}
+```
+
+accessToken 有效 15 分钟。`POST /api/v1/auth/refresh` 的 body 为 `{ "refreshToken":"…" }`，每次刷新都会撤销旧 refreshToken 并返回新 token 对；`POST /api/v1/auth/logout` 使用相同 body 撤销 refreshToken。数据库只保存 refreshToken 的 SHA-256 哈希。
+
+携带 API accessToken：`Authorization: Bearer <accessToken>`。
+
+用户资料接口：
+
+| 方法   | 路径                         | body                                      | 说明                                   |
+| ------ | ---------------------------- | ----------------------------------------- | -------------------------------------- |
+| GET    | `/api/v1/users/me`           |                                           | 当前用户（id、email、name、avatarUrl） |
+| PATCH  | `/api/v1/users/me`           | `{ "name":"…", "avatarUrl":"https://…" }` | 更新展示资料                           |
+| GET    | `/api/v1/users/me/cocktails` |                                           | 当前用户创建的公开与私人酒单           |
+| GET    | `/api/v1/users/me/favorites` |                                           | 返回按收藏时间倒序的酒单               |
+| POST   | `/api/v1/users/me/favorites` | `{ "cocktailId":"ne" }`                   | 收藏酒单                               |
+| DELETE | `/api/v1/users/me/favorites` | `{ "cocktailId":"ne" }`                   | 取消收藏                               |
 
 启动服务：
 
@@ -55,13 +90,13 @@ docker compose exec api pnpm seed
 
 错误码：
 
-| code | 含义 | HTTP 状态说明 |
-|---:|---|---|
-| `0` | 成功 | HTTP 200 |
-| `1400` | 参数校验失败 | DTO 校验通常为 HTTP 400；业务参数错误可能为 HTTP 200 |
-| `1404` | 资源不存在 | 业务异常为 HTTP 200 |
-| `1409` | 资源冲突或禁止操作 | 业务异常为 HTTP 200 |
-| `1500` | 服务器内部错误 | HTTP 500 |
+|   code | 含义               | HTTP 状态说明                                        |
+| -----: | ------------------ | ---------------------------------------------------- |
+|    `0` | 成功               | HTTP 200                                             |
+| `1400` | 参数校验失败       | DTO 校验通常为 HTTP 400；业务参数错误可能为 HTTP 200 |
+| `1404` | 资源不存在         | 业务异常为 HTTP 200                                  |
+| `1409` | 资源冲突或禁止操作 | 业务异常为 HTTP 200                                  |
+| `1500` | 服务器内部错误     | HTTP 500                                             |
 
 前端应优先判断响应 JSON 中的 `code`，不要只判断 HTTP 状态码。
 
@@ -95,14 +130,14 @@ docker compose exec api pnpm seed
 
 `spirit` 与 `base` 的对应关系：
 
-| spirit | base |
-|---|---|
-| `gin` | 金酒 |
+| spirit    | base   |
+| --------- | ------ |
+| `gin`     | 金酒   |
 | `whiskey` | 威士忌 |
-| `rum` | 朗姆 |
+| `rum`     | 朗姆   |
 | `tequila` | 龙舌兰 |
-| `vodka` | 伏特加 |
-| `other` | 其他 |
+| `vodka`   | 伏特加 |
+| `other`   | 其他   |
 
 查询、创建和修改时，`spirit` 或 `base` 都可以传中文或英文。中文 `全部` 表示不筛选。
 
@@ -135,11 +170,11 @@ GET /api/v1/cocktails
 
 查询参数：
 
-| 参数 | 必填 | 默认值 | 说明 |
-|---|---|---|---|
-| `page` | 否 | `1` | 页码，最小为 1 |
-| `limit` | 否 | `20` | 每页数量，范围 1～50 |
-| `spirit` | 否 | 无 | 基酒，中英文都可，例如 `gin` 或 `金酒` |
+| 参数     | 必填 | 默认值 | 说明                                   |
+| -------- | ---- | ------ | -------------------------------------- |
+| `page`   | 否   | `1`    | 页码，最小为 1                         |
+| `limit`  | 否   | `20`   | 每页数量，范围 1～50                   |
+| `spirit` | 否   | 无     | 基酒，中英文都可，例如 `gin` 或 `金酒` |
 
 请求示例：
 
@@ -298,25 +333,27 @@ POST /api/v1/cocktails
 Content-Type: application/json
 ```
 
-用途：System 页上传私人酒单。创建记录的 `isOfficial` 固定为 `false`，ID 由服务端生成。
+用途：System 页上传用户酒单。创建记录的 `isOfficial` 固定为 `false`，ID 由服务端生成。
+
+`isPrivate` 是可选布尔值，默认 `false`。登录后才应在 Flutter 创建页展示“私人酒单”开关：勾选后带 `Authorization: Bearer <accessToken>` 和 `"isPrivate":true`；服务端将酒单绑定至 token 对应用户，且只会在 `GET /users/me/cocktails` 与该所有者的详情请求中出现。未带 Token 的请求仍会创建公开酒单；未登录却提交 `isPrivate:true` 会被拒绝。
 
 请求字段：
 
-| 字段 | 必填 | 默认值/规则 |
-|---|---|---|
-| `zh` | 是 | 1～64 字符 |
-| `en` | 否 | `House Original` |
-| `spirit` / `base` | 二选一 | 中英文均可 |
-| `abv` | 否 | `20`，整数 0～99 |
-| `color` | 否 | `#0A84FF`，必须是 Hex 颜色 |
-| `tags` | 否 | `["私藏"]` |
-| `images` | 否 | `[]`，图片 URL 数组，可保存一张或多张图片 |
-| `glass` | 否 | `依你所好` |
-| `garnish` | 否 | `自由发挥` |
-| `flavor` | 否 | `来自你自己的酒单。` |
-| `story` | 否 | `这一杯由你定义。` |
-| `recipe` | 是 | 原料数组 |
-| `steps` | 否 | `[]`，字符串数组 |
+| 字段              | 必填   | 默认值/规则                               |
+| ----------------- | ------ | ----------------------------------------- |
+| `zh`              | 是     | 1～64 字符                                |
+| `en`              | 否     | `House Original`                          |
+| `spirit` / `base` | 二选一 | 中英文均可                                |
+| `abv`             | 否     | `20`，整数 0～99                          |
+| `color`           | 否     | `#0A84FF`，必须是 Hex 颜色                |
+| `tags`            | 否     | `["私藏"]`                                |
+| `images`          | 否     | `[]`，图片 URL 数组，可保存一张或多张图片 |
+| `glass`           | 否     | `依你所好`                                |
+| `garnish`         | 否     | `自由发挥`                                |
+| `flavor`          | 否     | `来自你自己的酒单。`                      |
+| `story`           | 否     | `这一杯由你定义。`                        |
+| `recipe`          | 是     | 原料数组                                  |
+| `steps`           | 否     | `[]`，字符串数组                          |
 
 每个 `recipe` 元素必须包含 `n`，并且 `ml` 和 `t` 必须二选一：
 
@@ -559,16 +596,16 @@ curl -X PATCH 'http://localhost:3000/api/v1/cocktails/V1StGXR8_Z5j' \
 
 ## 12. 接口汇总
 
-| 方法 | 路径 | 用途 |
-|---|---|---|
-| GET | `/api/v1/cocktails` | 分页列表与基酒筛选 |
-| GET | `/api/v1/cocktails/recommendations` | 今日 4 款推荐 |
-| GET | `/api/v1/cocktails/random` | 随机抽选 |
-| GET | `/api/v1/cocktails/:id` | 酒单详情 |
-| POST | `/api/v1/cocktails` | 创建私人酒单 |
-| PATCH | `/api/v1/cocktails/:id` | 修改私人酒单 |
-| DELETE | `/api/v1/cocktails/:id` | 软删除私人酒单 |
-| POST | `/api/v1/upload/image` | 上传封面图片 |
+| 方法   | 路径                                | 用途               |
+| ------ | ----------------------------------- | ------------------ |
+| GET    | `/api/v1/cocktails`                 | 分页列表与基酒筛选 |
+| GET    | `/api/v1/cocktails/recommendations` | 今日 4 款推荐      |
+| GET    | `/api/v1/cocktails/random`          | 随机抽选           |
+| GET    | `/api/v1/cocktails/:id`             | 酒单详情           |
+| POST   | `/api/v1/cocktails`                 | 创建私人酒单       |
+| PATCH  | `/api/v1/cocktails/:id`             | 修改私人酒单       |
+| DELETE | `/api/v1/cocktails/:id`             | 软删除私人酒单     |
+| POST   | `/api/v1/upload/image`              | 上传封面图片       |
 
 ## 13. Flutter 调用注意事项
 

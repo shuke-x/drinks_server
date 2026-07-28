@@ -1,18 +1,36 @@
 services:
   postgres:
     image: postgres:16-alpine
-    environment: {POSTGRES_USER: drinks, POSTGRES_PASSWORD: drinks, POSTGRES_DB: tonight_drinks}
+    environment:
+      {
+        POSTGRES_USER: drinks,
+        POSTGRES_PASSWORD: drinks,
+        POSTGRES_DB: tonight_drinks,
+      }
     volumes: [postgres_data:/var/lib/postgresql/data]
-    healthcheck: {test: [CMD-SHELL, "pg_isready -U drinks -d tonight_drinks"], interval: 5s, timeout: 3s, retries: 10}
+    healthcheck:
+      {
+        test: [CMD-SHELL, "pg_isready -U drinks -d tonight_drinks"],
+        interval: 5s,
+        timeout: 3s,
+        retries: 10,
+      }
   redis:
     image: redis:7-alpine
-    healthcheck: {test: [CMD, redis-cli, ping], interval: 5s, timeout: 3s, retries: 10}
+    healthcheck:
+      { test: [CMD, redis-cli, ping], interval: 5s, timeout: 3s, retries: 10 }
   api:
     build: .
+    command:
+      [
+        sh,
+        -c,
+        "pnpm exec typeorm -d dist/src/config/typeorm.datasource.js migration:run && node dist/src/main.js",
+      ]
     env_file: .env
     ports: ["3000:3000"]
     volumes: [uploads:/app/uploads]
     depends_on:
-      postgres: {condition: service_healthy}
-      redis: {condition: service_healthy}
-volumes: {postgres_data: {}, uploads: {}}
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+volumes: { postgres_data: {}, uploads: {} }

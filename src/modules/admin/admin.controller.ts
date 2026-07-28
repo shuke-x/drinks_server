@@ -1,0 +1,26 @@
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
+import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { Request } from "express";
+import { AccessTokenGuard } from "../auth/access-token.guard";
+import { AdminService } from "./admin.service";
+import { RequirePermissions } from "./decorators/require-permissions.decorator";
+import { AdminCocktailQueryDto, AdminUserQueryDto, ReplaceUserRolesDto, ReviewDto, UpdateUserStatusDto } from "./dto/admin.dto";
+import { PermissionsGuard } from "./guards/permissions.guard";
+type AuthRequest = Request & { authUser: { id: string } };
+@ApiTags("admin") @ApiBearerAuth("access-token") @Controller("admin") @UseGuards(AccessTokenGuard, PermissionsGuard)
+export class AdminController {
+  constructor(private readonly admin: AdminService) {}
+  @Get("users") @RequirePermissions("users.read") users(@Query() q: AdminUserQueryDto) { return this.admin.usersList(q); }
+  @Get("users/:id") @RequirePermissions("users.read") user(@Param("id") id: string) { return this.admin.userDetail(id); }
+  @Patch("users/:id/status") @RequirePermissions("users.update_status") status(@Req() r: AuthRequest, @Param("id") id: string, @Body() dto: UpdateUserStatusDto) { return this.admin.setUserStatus(r.authUser.id, id, dto); }
+  @Put("users/:id/roles") @RequirePermissions("users.assign_roles") roles(@Req() r: AuthRequest, @Param("id") id: string, @Body() dto: ReplaceUserRolesDto) { return this.admin.replaceRoles(r.authUser.id, id, dto.roleIds); }
+  @Get("cocktails") @RequirePermissions("cocktails.read") cocktails(@Query() q: AdminCocktailQueryDto) { return this.admin.cocktailsList(q); }
+  @Get("cocktails/:id") @RequirePermissions("cocktails.read") cocktail(@Param("id") id: string) { return this.admin.cocktailDetail(id); }
+  @Post("cocktails/:id/approve") @RequirePermissions("cocktails.review") approve(@Req() r: AuthRequest, @Param("id") id: string, @Body() dto: ReviewDto) { return this.admin.review(r.authUser.id, id, "approve", dto.reason); }
+  @Post("cocktails/:id/reject") @RequirePermissions("cocktails.review") reject(@Req() r: AuthRequest, @Param("id") id: string, @Body() dto: ReviewDto) { return this.admin.review(r.authUser.id, id, "reject", dto.reason); }
+  @Post("cocktails/:id/offline") @RequirePermissions("cocktails.offline") offline(@Req() r: AuthRequest, @Param("id") id: string, @Body() dto: ReviewDto) { return this.admin.review(r.authUser.id, id, "offline", dto.reason); }
+  @Post("cocktails/:id/publish") @RequirePermissions("cocktails.publish") publish(@Req() r: AuthRequest, @Param("id") id: string, @Body() dto: ReviewDto) { return this.admin.review(r.authUser.id, id, "publish", dto.reason); }
+  @Delete("cocktails/:id") @RequirePermissions("cocktails.delete") remove(@Req() r: AuthRequest, @Param("id") id: string) { return this.admin.removeCocktail(r.authUser.id, id); }
+  @Get("audit-logs") @RequirePermissions("audit_logs.read") auditLogs(@Query() q: AdminUserQueryDto) { return this.admin.auditLogs(q); }
+  @Get("roles") @RequirePermissions("roles.read") rolesList() { return this.admin.listRoles(); }
+}

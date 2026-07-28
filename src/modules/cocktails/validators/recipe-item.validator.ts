@@ -1,2 +1,33 @@
-import { registerDecorator, ValidationArguments, ValidationOptions } from 'class-validator';
-export function IsRecipe(validationOptions?:ValidationOptions){return (target:object,propertyName:string)=>registerDecorator({name:'isRecipe',target:target.constructor,propertyName,options:validationOptions,validator:{validate(value:unknown){return Array.isArray(value)&&value.every((x:any)=>x&&typeof x.n==='string'&&x.n.trim()&&((Number.isInteger(x.ml)&&x.ml>0)||(typeof x.t==='string'&&x.t.trim()))&&!(x.ml!==undefined&&x.t!==undefined));},defaultMessage(_:ValidationArguments){return 'recipe items require n and exactly one of positive integer ml or non-empty t';}}});}
+import {
+  registerDecorator,
+  ValidationArguments,
+  ValidationOptions,
+} from "class-validator";
+export function IsRecipe(validationOptions?: ValidationOptions) {
+  return (target: object, propertyName: string) =>
+    registerDecorator({
+      name: "isRecipe",
+      target: target.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: unknown) {
+          return (
+            Array.isArray(value) &&
+            value.every(
+              (x: any) =>
+                x &&
+                typeof x.n === "string" &&
+                x.n.trim() &&
+                ((Number.isInteger(x.ml) && x.ml > 0) ||
+                  (typeof x.t === "string" && x.t.trim())) &&
+                !(x.ml !== undefined && x.t !== undefined),
+            )
+          );
+        },
+        defaultMessage(_: ValidationArguments) {
+          return "recipe items require n and exactly one of positive integer ml or non-empty t";
+        },
+      },
+    });
+}

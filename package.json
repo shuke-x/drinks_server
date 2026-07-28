@@ -12,8 +12,10 @@
     "test:e2e": "jest --config test/jest-e2e.json",
     "seed": "node dist/src/seeds/cocktails.seed.js",
     "seed:dev": "ts-node -r tsconfig-paths/register src/seeds/cocktails.seed.ts",
+    "migration:show": "typeorm-ts-node-commonjs -d src/config/typeorm.datasource.ts migration:show",
     "migration:run": "typeorm-ts-node-commonjs -d src/config/typeorm.datasource.ts migration:run",
-    "migration:revert": "typeorm-ts-node-commonjs -d src/config/typeorm.datasource.ts migration:revert"
+    "migration:revert": "typeorm-ts-node-commonjs -d src/config/typeorm.datasource.ts migration:revert",
+    "migration:generate": "typeorm-ts-node-commonjs -d src/config/typeorm.datasource.ts migration:generate migrations/SchemaChange"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",
@@ -23,6 +25,7 @@
     "@nestjs/serve-static": "^4.0.2",
     "@nestjs/swagger": "^8.1.0",
     "@nestjs/typeorm": "^10.0.2",
+    "argon2": "^0.41.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "ioredis": "^5.4.2",
@@ -31,7 +34,8 @@
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "typeorm": "^0.3.20"
+    "typeorm": "^0.3.20",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.8",
