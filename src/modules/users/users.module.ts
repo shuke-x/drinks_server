@@ -6,8 +6,9 @@ import { Favorite } from "./entities/favorite.entity";
 import { User } from "./entities/user.entity";
 import { UsersController } from "./users.controller";
 import { UsersService } from "./users.service";
+import { CocktailRevision } from "../cocktails/entities/cocktail-revision.entity";
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Favorite, Cocktail]), AuthModule],
+  imports: [TypeOrmModule.forFeature([User, Favorite, Cocktail, CocktailRevision]), AuthModule],
   controllers: [UsersController],
   providers: [UsersService],
 })

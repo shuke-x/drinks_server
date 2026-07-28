@@ -2,7 +2,6 @@ import { Transform } from "class-transformer";
 import {
   IsArray,
   IsBoolean,
-  IsEnum,
   IsHexColor,
   IsInt,
   IsOptional,
@@ -12,7 +11,7 @@ import {
   Max,
   Min,
 } from "class-validator";
-import { Spirit, transformSpirit } from "../mappers/spirit.mapper";
+import { transformSpirit } from "../mappers/spirit.mapper";
 import { IsRecipe } from "../validators/recipe-item.validator";
 import { RecipeItem } from "../entities/cocktail.entity";
 export class CreateCocktailDto {
@@ -20,8 +19,8 @@ export class CreateCocktailDto {
   @IsOptional() @IsBoolean() isPrivate?: boolean;
   @IsString() @Length(1, 64) zh!: string;
   @IsOptional() @IsString() @Length(1, 128) en = "House Original";
-  @IsOptional() @Transform(transformSpirit) @IsEnum(Spirit) spirit?: Spirit;
-  @IsOptional() @Transform(transformSpirit) @IsEnum(Spirit) base?: Spirit;
+  @IsOptional() @Transform(transformSpirit) @IsString() @Length(1, 64) spirit?: string;
+  @IsOptional() @Transform(transformSpirit) @IsString() @Length(1, 64) base?: string;
   @IsOptional() @IsInt() @Min(0) @Max(99) abv = 20;
   @IsOptional() @IsHexColor() color = "#0A84FF";
   @IsOptional() @IsArray() @IsString({ each: true }) tags = ["私藏"];

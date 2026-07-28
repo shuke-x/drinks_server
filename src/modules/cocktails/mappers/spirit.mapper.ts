@@ -24,7 +24,7 @@ const aliases: Record<string, Spirit> = {
   vodka: Spirit.VODKA,
   other: Spirit.OTHER,
 };
-export const spiritToBase = (v: Spirit) => zh[v];
+export const spiritToBase = (v: string) => zh[v as Spirit] ?? v;
 export function normalizeSpirit(value: unknown): Spirit | undefined {
   if (value === undefined || value === null || value === "" || value === "全部")
     return undefined;

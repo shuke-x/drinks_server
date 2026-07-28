@@ -4,9 +4,11 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import { Cocktail } from "../cocktails/entities/cocktail.entity";
+import { CocktailStatus } from "../cocktails/entities/cocktail.entity";
 import { spiritToBase } from "../cocktails/mappers/spirit.mapper";
+import { CocktailRevision } from "../cocktails/entities/cocktail-revision.entity";
 import { Favorite } from "./entities/favorite.entity";
 import { User } from "./entities/user.entity";
 import { UpdateMeDto } from "./dto/update-me.dto";
@@ -18,6 +20,8 @@ export class UsersService {
     private readonly favorites: Repository<Favorite>,
     @InjectRepository(Cocktail)
     private readonly cocktails: Repository<Cocktail>,
+    @InjectRepository(CocktailRevision)
+    private readonly revisions: Repository<CocktailRevision>,
   ) {}
   async me(id: string) {
     const user = await this.users.findOneBy({ id });
@@ -33,11 +37,25 @@ export class UsersService {
   async myCocktails(userId: string) {
     const cocktails = await this.cocktails.find({
       where: { owner: { id: userId } },
+      relations: { category: true },
       order: { createdAt: "DESC" },
     });
+    const revisions = cocktails.length
+      ? await this.revisions.find({
+          where: { cocktail: { id: In(cocktails.map((x) => x.id)) } },
+          relations: { cocktail: true },
+          order: { createdAt: "DESC" },
+        })
+      : [];
+    const latest = new Map<string, CocktailRevision>();
+    for (const revision of revisions) {
+      const cocktailId = revision.cocktail?.id;
+      if (cocktailId && !latest.has(cocktailId)) latest.set(cocktailId, revision);
+    }
     return cocktails.map(({ owner, ...cocktail }) => ({
       ...cocktail,
-      base: spiritToBase(cocktail.spirit),
+      base: cocktail.category?.name ?? spiritToBase(cocktail.spirit),
+      latestRevision: latest.get(cocktail.id) ?? null,
       deletedAt: undefined,
     }));
   }
@@ -54,14 +72,18 @@ export class UsersService {
       this.users.findOneBy({ id: userId }),
       this.cocktails.findOne({
         where: { id: cocktailId },
-        relations: { owner: true },
+        relations: { owner: true, category: true },
       }),
       this.favorites.findOne({
         where: { user: { id: userId }, cocktail: { id: cocktailId } },
       }),
     ]);
     if (!user) throw new NotFoundException("User not found");
-    if (!cocktail || (cocktail.isPrivate && cocktail.owner?.id !== userId))
+    if (
+      !cocktail ||
+      ((cocktail.isPrivate || cocktail.status !== CocktailStatus.PUBLISHED) &&
+        cocktail.owner?.id !== userId)
+    )
       throw new NotFoundException("Cocktail not found");
     if (existing) return { cocktail, alreadyFavorite: true };
     try {

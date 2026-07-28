@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 import { User } from "../../users/entities/user.entity";
 import { Cocktail, CocktailStatus } from "./cocktail.entity";
 @Entity("cocktail_revisions") export class CocktailRevision {
@@ -8,5 +8,8 @@ import { Cocktail, CocktailStatus } from "./cocktail.entity";
   @Column({ type: "jsonb" }) content!: object;
   @Column({ type: "enum", enum: CocktailStatus, default: CocktailStatus.DRAFT }) status!: CocktailStatus;
   @Column({ type: "varchar", length: 500, nullable: true }) rejectReason!: string | null;
+  @ManyToOne(() => User, { onDelete: "SET NULL", nullable: true }) reviewer!: User | null;
+  @Column({ type: "timestamptz", nullable: true }) reviewedAt!: Date | null;
   @CreateDateColumn({ type: "timestamptz" }) createdAt!: Date;
+  @UpdateDateColumn({ type: "timestamptz" }) updatedAt!: Date;
 }

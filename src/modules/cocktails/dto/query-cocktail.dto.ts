@@ -1,7 +1,7 @@
 import { Transform } from "class-transformer";
-import { IsEnum, IsOptional } from "class-validator";
+import { IsOptional, IsString, Length } from "class-validator";
 import { PaginationDto } from "../../../common/dto/pagination.dto";
-import { Spirit, transformSpirit } from "../mappers/spirit.mapper";
+import { transformSpirit } from "../mappers/spirit.mapper";
 export class QueryCocktailDto extends PaginationDto {
-  @IsOptional() @Transform(transformSpirit) @IsEnum(Spirit) spirit?: Spirit;
+  @IsOptional() @Transform(transformSpirit) @IsString() @Length(1, 64) spirit?: string;
 }

@@ -17,6 +17,12 @@ import { AdminBootstrapService } from "./admin-bootstrap.service";
 import { AdminImportJob } from "./entities/import-job.entity";
 import { ImportJobsController } from "./import-jobs.controller";
 import { ImportJobsService } from "./import-jobs.service";
+import { CocktailCategory } from "../cocktails/entities/cocktail-category.entity";
+import { CocktailCategoriesService } from "../cocktails/cocktail-categories.service";
+import { AdminCategoriesController } from "./admin-categories.controller";
+import { AdminCategoriesService } from "./admin-categories.service";
+import { CocktailRevision } from "../cocktails/entities/cocktail-revision.entity";
+import { AdminRevisionsService } from "./admin-revisions.service";
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -29,16 +35,21 @@ import { ImportJobsService } from "./import-jobs.service";
       RolePermission,
       AdminAuditLog,
       AdminImportJob,
+      CocktailCategory,
+      CocktailRevision,
     ]),
     AuthModule,
     RedisModule,
   ],
-  controllers: [AdminController, ImportJobsController],
+  controllers: [AdminController, ImportJobsController, AdminCategoriesController],
   providers: [
     AdminService,
     PermissionsGuard,
     AdminBootstrapService,
     ImportJobsService,
+    CocktailCategoriesService,
+    AdminCategoriesService,
+    AdminRevisionsService,
   ],
 })
 export class AdminModule {}

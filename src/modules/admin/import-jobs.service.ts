@@ -19,6 +19,7 @@ import {
 } from "../cocktails/entities/cocktail.entity";
 import { normalizeSpirit } from "../cocktails/mappers/spirit.mapper";
 import { User } from "../users/entities/user.entity";
+import { CocktailCategory } from "../cocktails/entities/cocktail-category.entity";
 import { AdminAuditLog } from "./entities/audit-log.entity";
 import {
   AdminImportJob,
@@ -43,6 +44,8 @@ export class ImportJobsService implements OnModuleInit {
     private readonly jobs: Repository<AdminImportJob>,
     @InjectRepository(Cocktail)
     private readonly cocktails: Repository<Cocktail>,
+    @InjectRepository(CocktailCategory)
+    private readonly categories: Repository<CocktailCategory>,
     @InjectRepository(User)
     private readonly users: Repository<User>,
     @InjectRepository(AdminAuditLog)
@@ -200,6 +203,16 @@ export class ImportJobsService implements OnModuleInit {
     if (errors.length) throw new Error(flattenValidationErrors(errors));
     const spirit = dto.spirit ?? dto.base;
     if (!spirit) throw new Error("spirit or base is required");
+    const normalizedSpirit =
+      normalizeSpirit(spirit) ?? spirit.trim().toLowerCase();
+    const category = await this.categories
+      .createQueryBuilder("category")
+      .where(
+        "(LOWER(category.code) = :value OR LOWER(category.name) = :value OR LOWER(COALESCE(category.nameEn, '')) = :value) AND category.isActive = true",
+        { value: normalizedSpirit.toLowerCase() },
+      )
+      .getOne();
+    if (!category) throw new Error("baseSpirit category does not exist or is inactive");
     const requestedId = stringOrUndefined(raw.id)?.trim();
     if (requestedId && !/^[A-Za-z0-9_-]{1,32}$/.test(requestedId))
       throw new Error("id must contain only letters, numbers, _ or -");
@@ -207,7 +220,8 @@ export class ImportJobsService implements OnModuleInit {
     return this.cocktails.create({
       ...fields,
       id: requestedId || nanoid(12),
-      spirit,
+      spirit: category.code,
+      category,
       isOfficial: !isPrivate,
       isPrivate,
       status: isPrivate ? CocktailStatus.DRAFT : CocktailStatus.PUBLISHED,

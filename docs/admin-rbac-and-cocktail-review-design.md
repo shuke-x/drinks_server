@@ -10,15 +10,17 @@
 - 后台接口统一使用 `/api/v1/admin/*`，登录后继续由 RBAC 校验 `super_admin`、`operator`、`reviewer` 的具体权限；普通用户直接调用后台接口返回 403。
 - 用户状态、RBAC、酒单审核状态机、审核日志、管理员审计日志已实现。
 - JSON/XLSX 异步批量导入、任务查询、失败重试、逐行错误报告和 XLSX 模板下载已实现；导入权限 `imports.manage` 只授予 `super_admin`。
-- migrations `1750000000000`、`1760000000000`、`1770000000000` 已在 Docker PostgreSQL 执行，当前无待执行 migration。
+- 动态酒单分类表、公开分类列表和后台分类 CRUD 已实现；分类管理权限 `categories.manage` 只授予 `super_admin`。原有 6 个基酒类型已回填，酒单不再受代码 enum 限制。
+- 已发布酒单修订流程已实现：作者编辑时创建独立草稿版本，线上版本保持可见；修订提交后由后台审核，通过时事务性替换线上内容，驳回时保留原因。
+- migrations `1750000000000` 至 `1780000000000` 已在 Docker PostgreSQL 执行，当前无待执行 migration。
 - Docker API 容器启动时会先执行编译后的 TypeORM migration，再启动 NestJS，避免新代码早于数据库结构启动。
-- 导入解析相关测试 6 项通过，NestJS 编译通过，Docker 中 PostgreSQL、Redis、API 均已运行。
+- 自动化测试 11 项通过，NestJS 编译通过，Docker 中 PostgreSQL、Redis、API 均已运行。
+- 当前数据库唯一注册账号已被明确配置为首位 `super_admin`，并确认拥有导入、分类管理和酒单审核权限。
 
 尚未完成：
 
-- 酒单分类表及分类 CRUD。目前 `gin / whiskey / rum / tequila / vodka / other` 仍是代码中的 `Spirit` enum；后续需要新增分类表、回填旧数据，并将客户端筛选与导入校验切换到动态分类。
-- `cocktail_revisions` 数据表已经建立，但“已发布版本保持在线、新修订版本独立审核并替换”的完整业务接口仍需继续实现。
-- 当前数据库尚未分配首位 `super_admin`；部署环境需要设置 `ADMIN_BOOTSTRAP_EMAIL` 为一个已注册邮箱后重启 API。
+- 搜索目前仍是基础筛选方案；需要按名称、标签进行模糊搜索时再增加查询参数和索引。
+- 全新环境仍应通过 `ADMIN_BOOTSTRAP_EMAIL` 明确指定首位超级管理员，不能自动提升首位注册用户。
 
 ## 1. 目标与边界
 
@@ -233,7 +235,30 @@ cocktails/
 - `GET /api/v1/admin/import-jobs/:id`：任务详情及逐行错误。
 - `POST /api/v1/admin/import-jobs/:id/retry`：重试整体失败的任务。
 
-## 9. 供其他项目复用的实施提示词
+## 9. 动态酒单分类
+
+分类实体为 `cocktail_categories`，字段包括 `code`、`name`、`nameEn`、`description`、`iconUrl`、`sortOrder`、`isActive`。`code` 创建后不可修改，酒单通过外键关联分类。
+
+- `GET /api/v1/cocktail-categories`：客户端读取所有启用分类，无需登录。
+- `GET /api/v1/admin/cocktail-categories`：后台读取全部分类。
+- `POST /api/v1/admin/cocktail-categories`：新增分类。
+- `PATCH /api/v1/admin/cocktail-categories/:id`：修改名称、图标、排序或启用状态。
+- `DELETE /api/v1/admin/cocktail-categories/:id`：删除未被引用的分类；已有酒单引用时必须改为停用。
+
+后台写操作要求 `categories.manage` 并写入审计日志。客户端酒单筛选、随机接口和批量导入均从数据库解析分类编码、中文名或英文名。
+
+## 10. 已发布酒单修订流程
+
+作者对 `published` 酒单调用现有 `PATCH /api/v1/cocktails/:id` 时，不直接修改主表，而是创建或更新 `cocktail_revisions` 草稿。调用 `POST /api/v1/cocktails/:id/submit` 后修订进入 `pending`，线上主版本始终保持公开。
+
+- `POST /api/v1/admin/cocktails/:id/revisions/:revisionId/approve`：审核通过，在事务中把修订内容和分类替换到主表，修订状态设为 `published`，并清理公开缓存。
+- `POST /api/v1/admin/cocktails/:id/revisions/:revisionId/reject`：驳回待审修订并记录原因。
+- `POST /api/v1/cocktails/:id/withdraw`：作者撤回待审修订，恢复为草稿。
+- `GET /api/v1/admin/cocktails/:id`：返回主版本、全部修订和审核历史。
+
+同一酒单最多只能有一个 `pending` 修订，由数据库部分唯一索引保证。审核和线上替换均写审核日志与后台审计日志。
+
+## 11. 供其他项目复用的实施提示词
 
 将下方内容复制到目标项目的 AI 编程助手中，并替换尖括号内的值。先要求助手审查项目，再授权实施，避免它基于假设修改数据库。
 

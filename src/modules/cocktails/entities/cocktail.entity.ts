@@ -5,11 +5,12 @@ import {
   Entity,
   Index,
   ManyToOne,
+  JoinColumn,
   PrimaryColumn,
   UpdateDateColumn,
 } from "typeorm";
-import { Spirit } from "../mappers/spirit.mapper";
 import { User } from "../../users/entities/user.entity";
+import { CocktailCategory } from "./cocktail-category.entity";
 export type RecipeItem = { n: string; ml?: number; t?: string };
 export enum CocktailStatus {
   DRAFT = "draft",
@@ -23,7 +24,11 @@ export class Cocktail {
   @PrimaryColumn({ type: "varchar", length: 32 }) id!: string;
   @Column({ length: 64 }) zh!: string;
   @Column({ length: 128, default: "House Original" }) en!: string;
-  @Index() @Column({ type: "enum", enum: Spirit }) spirit!: Spirit;
+  /** Public API compatibility field; values are managed by cocktail_categories. */
+  @Index() @Column({ type: "varchar", length: 64 }) spirit!: string;
+  @ManyToOne(() => CocktailCategory, { nullable: false, onDelete: "RESTRICT" })
+  @JoinColumn({ name: "categoryId" })
+  category!: CocktailCategory;
   @Column({ type: "smallint", default: 20 }) abv!: number;
   @Column({ length: 9, default: "#0A84FF" }) color!: string;
   @Column({ type: "simple-array", default: "" }) tags!: string[];
