@@ -21,6 +21,8 @@ import { RedisService } from "../redis/redis.service";
 import { User } from "../users/entities/user.entity";
 import { UserStatus } from "../users/entities/user.entity";
 import { RefreshToken } from "./entities/refresh-token.entity";
+import { UserRole } from "../admin/entities/user-role.entity";
+import { RolePermission } from "../admin/entities/role-permission.entity";
 
 // Kept as a runtime dependency so production always uses the native Argon2id implementation.
 // `require` also keeps TypeScript builds usable before `pnpm install` has fetched the package.
@@ -54,6 +56,10 @@ export class AuthService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(RefreshToken)
     private readonly refreshTokens: Repository<RefreshToken>,
+    @InjectRepository(UserRole)
+    private readonly userRoles: Repository<UserRole>,
+    @InjectRepository(RolePermission)
+    private readonly rolePermissions: Repository<RolePermission>,
   ) {
     const pem = config
       .get<string>("AUTH_RSA_PRIVATE_KEY")
@@ -147,6 +153,35 @@ export class AuthService {
       record.revokedAt = new Date();
       await this.refreshTokens.save(record);
     }
+  }
+  async me(userId: string) {
+    const user = await this.users.findOneBy({ id: userId });
+    if (!user || user.status === UserStatus.DISABLED)
+      throw new UnauthorizedException("User account is disabled");
+    const assignments = await this.userRoles.find({
+      where: { user: { id: userId } },
+      relations: { role: true },
+    });
+    const roles = assignments.map((assignment) => assignment.role);
+    const roleIds = roles.map((role) => role.id);
+    const pairs = roleIds.length
+      ? await this.rolePermissions
+          .createQueryBuilder("rolePermission")
+          .leftJoinAndSelect("rolePermission.permission", "permission")
+          .where("rolePermission.roleId IN (:...roleIds)", { roleIds })
+          .getMany()
+      : [];
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+        status: user.status,
+        roles,
+      },
+      permissions: [...new Set(pairs.map((pair) => pair.permission.code))],
+    };
   }
   verifyAccess(token: string): JwtPayload {
     const [header, body, signature] = token.split(".");

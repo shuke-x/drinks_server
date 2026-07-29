@@ -5,10 +5,48 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 import { ResponseInterceptor } from "./common/interceptors/response.interceptor";
 import { AllExceptionFilter } from "./common/filters/http-exception.filter";
+import helmet from "helmet";
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const env = app.get(ConfigService);
+  const nodeEnv = env.get<string>("NODE_ENV", "development");
+  const swaggerEnabled =
+    env.get<string>(
+      "SWAGGER_ENABLED",
+      nodeEnv === "production" ? "false" : "true",
+    ) === "true";
+  const corsOrigins = env
+    .get<string>("CORS_ORIGINS", "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const express = app.getHttpAdapter().getInstance();
+  express.set("trust proxy", env.get<string>("TRUST_PROXY", "loopback"));
+  app.use(
+    swaggerEnabled
+      ? helmet({
+          contentSecurityPolicy: false,
+          crossOriginResourcePolicy: { policy: "cross-origin" },
+        })
+      : helmet({
+          crossOriginResourcePolicy: { policy: "cross-origin" },
+        }),
+  );
   app.setGlobalPrefix("api/v1");
-  app.enableCors();
+  app.enableCors({
+    origin: corsOrigins.length > 0 ? corsOrigins : false,
+    methods: [
+      "GET",
+      "HEAD",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+    allowedHeaders: ["Authorization", "Content-Type"],
+    maxAge: 86400,
+  });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -18,24 +56,25 @@ async function bootstrap() {
   );
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalFilters(new AllExceptionFilter());
-  const config = new DocumentBuilder()
-    .setTitle("今晚喝什么 API")
-    .setDescription(
-      '所有成功响应均为 `{ code: 0, message: "ok", data: ... }`。需要登录的接口使用 Bearer accessToken。',
-    )
-    .setVersion("1.0")
-    .addBearerAuth(
-      {
-        type: "http",
-        scheme: "bearer",
-        bearerFormat: "JWT",
-        description: "填写登录或刷新接口返回的 accessToken。",
-      },
-      "access-token",
-    )
-    .build();
-  SwaggerModule.setup("docs", app, SwaggerModule.createDocument(app, config));
-  const env = app.get(ConfigService);
+  if (swaggerEnabled) {
+    const config = new DocumentBuilder()
+      .setTitle("今晚喝什么 API")
+      .setDescription(
+        '所有成功响应均为 `{ code: 0, message: "ok", data: ... }`。需要登录的接口使用 Bearer accessToken。',
+      )
+      .setVersion("1.0")
+      .addBearerAuth(
+        {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+          description: "填写登录或刷新接口返回的 accessToken。",
+        },
+        "access-token",
+      )
+      .build();
+    SwaggerModule.setup("docs", app, SwaggerModule.createDocument(app, config));
+  }
   await app.listen(env.get<number>("PORT", 3000));
 }
 void bootstrap();

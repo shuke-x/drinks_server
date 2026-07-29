@@ -42,6 +42,19 @@ export class RedisService {
     );
     return result === "OK";
   }
+  /** Atomically increment a fixed-window counter and return its remaining TTL. */
+  async incrementWithTTL(key: string, seconds: number) {
+    const result = (await this.client.eval(
+      "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; local ttl=redis.call('TTL',KEYS[1]); return {n,ttl}",
+      1,
+      key,
+      Math.max(1, seconds),
+    )) as [number, number];
+    return {
+      count: Number(result[0]),
+      ttlSeconds: Math.max(1, Number(result[1])),
+    };
+  }
   async del(pattern: string) {
     if (!pattern.includes("*")) {
       await this.client.del(pattern);

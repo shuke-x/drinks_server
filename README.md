@@ -1,6 +1,6 @@
 # 今晚喝什么 API
 
-NestJS 10、PostgreSQL 16、Redis 7。API 前缀 `/api/v1`，Swagger 为 `/docs`。
+NestJS 10、PostgreSQL 16、Redis 7。API 前缀 `/api/v1`；开发环境 Swagger 默认为 `/docs`，生产环境默认关闭。
 
 数据库结构通过 TypeORM migration 维护；不要在常规环境启用 `DB_SYNC`。常用命令：`pnpm migration:show`、`pnpm migration:run`、`pnpm migration:revert`。
 
