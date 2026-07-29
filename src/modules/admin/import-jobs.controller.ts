@@ -21,6 +21,7 @@ import {
   ApiTags,
 } from "@nestjs/swagger";
 import { Request } from "express";
+import type { Options as MulterOptions } from "multer";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { AccessTokenGuard } from "../auth/access-token.guard";
 import { RequirePermissions } from "./decorators/require-permissions.decorator";
@@ -52,7 +53,13 @@ export class ImportJobsController {
   })
   @UseInterceptors(
     FileInterceptor("file", {
-      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+      limits: {
+        fileSize: 10 * 1024 * 1024,
+        files: 1,
+        fields: 0,
+        parts: 1,
+        fieldNestingDepth: 0,
+      } as MulterOptions["limits"] & { fieldNestingDepth: number },
       fileFilter: (_, file, callback) => {
         const accepted =
           /\.(json|xlsx)$/i.test(file.originalname) ||
