@@ -53,8 +53,8 @@ export class UploadController {
       limits: {
         fileSize: 15 * 1024 * 1024,
         files: 1,
-        fields: 0,
-        parts: 1,
+        fields: 2,
+        parts: 3,
         fieldNestingDepth: 0,
       } as MulterOptions["limits"] & { fieldNestingDepth: number },
       fileFilter: (_, file, cb) => {

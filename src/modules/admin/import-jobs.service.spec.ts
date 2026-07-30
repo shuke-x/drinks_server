@@ -1,5 +1,8 @@
 import { BadRequestException } from "@nestjs/common";
+import { plainToInstance } from "class-transformer";
+import { validateSync } from "class-validator";
 import * as XLSX from "xlsx";
+import { CreateCocktailDto } from "../cocktails/dto/create-cocktail.dto";
 import {
   detectImportFormat,
   createImportTemplate,
@@ -65,6 +68,36 @@ describe("import job file parsing", () => {
       images: ["https://example.com/image.webp"],
       isPrivate: true,
     });
+  });
+
+  it("parses human-readable multiline ingredients and numbered steps", () => {
+    const normalized = normalizeImportRow({
+      name: "最后一语",
+      baseSpirit: "Gin",
+      ingredients:
+        "金酒 22.5 ml\n青绿查特酒 22.5 ml\n樱桃 1 颗\n糖浆 5 ml（按口味）",
+      steps: "1. 全部材料加冰摇匀。\n2. 双重过滤至冰镇杯。",
+      tags: "经典,草本，酸甜",
+      isPrivate: "FALSE",
+    });
+
+    expect(normalized).toMatchObject({
+      zh: "最后一语",
+      spirit: "gin",
+      recipe: [
+        { n: "金酒", ml: 22.5 },
+        { n: "青绿查特酒", ml: 22.5 },
+        { n: "樱桃", t: "1 颗" },
+        { n: "糖浆", t: "5 ml（按口味）" },
+      ],
+      steps: ["全部材料加冰摇匀。", "双重过滤至冰镇杯。"],
+      tags: ["经典", "草本", "酸甜"],
+      isPrivate: false,
+    });
+
+    expect(
+      validateSync(plainToInstance(CreateCocktailDto, normalized)),
+    ).toEqual([]);
   });
 
   it("generates a readable XLSX template", () => {

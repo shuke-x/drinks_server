@@ -340,9 +340,13 @@ export function normalizeImportRow(raw: Record<string, unknown>) {
         try {
           row[field] = JSON.parse(trimmed);
         } catch {
-          if (field === "tags" || field === "steps" || field === "images")
-            row[field] = trimmed.split(",").map((x) => x.trim());
-          else throw new Error(`${field} must be valid JSON`);
+          if (field === "recipe") row[field] = parseRecipeText(trimmed);
+          else if (field === "steps") row[field] = parseStepsText(trimmed);
+          else if (field === "tags" || field === "images")
+            row[field] = trimmed
+              .split(/[,，\r\n]+/)
+              .map((x) => x.trim())
+              .filter(Boolean);
         }
       }
     }
@@ -376,6 +380,35 @@ function normalizeIngredient(value: unknown) {
   if (Number.isFinite(amount) && unit === "ml") return { n: name, ml: amount };
   const text = [value.amount, value.unit].filter((x) => x != null).join(" ");
   return { n: name, ...(text ? { t: text } : {}) };
+}
+
+function parseRecipeText(value: string) {
+  return value
+    .split(/\r?\n|;/)
+    .map((line) => line.trim().replace(/^[-•]\s*/, ""))
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(
+        /^(.+?)\s+((?:\d+(?:\.\d+)?(?:\s*[–-]\s*\d+(?:\.\d+)?)?|适量|少许).*)$/,
+      );
+      if (!match)
+        throw new Error(
+          `recipe line must contain an ingredient name and amount: ${line}`,
+        );
+      const name = match[1].trim();
+      const amount = match[2].trim();
+      const milliliters = amount.match(/^(\d+(?:\.\d+)?)\s*ml$/i);
+      return milliliters
+        ? { n: name, ml: Number(milliliters[1]) }
+        : { n: name, t: amount };
+    });
+}
+
+function parseStepsText(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((step) => step.trim().replace(/^\d+[.、)]\s*/, ""))
+    .filter(Boolean);
 }
 
 function parseBoolean(value: unknown) {

@@ -19,14 +19,14 @@ export function IsRecipe(validationOptions?: ValidationOptions) {
                 x &&
                 typeof x.n === "string" &&
                 x.n.trim() &&
-                ((Number.isInteger(x.ml) && x.ml > 0) ||
+                ((Number.isFinite(x.ml) && x.ml > 0) ||
                   (typeof x.t === "string" && x.t.trim())) &&
                 !(x.ml !== undefined && x.t !== undefined),
             )
           );
         },
         defaultMessage(_: ValidationArguments) {
-          return "recipe items require n and exactly one of positive integer ml or non-empty t";
+          return "recipe items require n and exactly one of positive ml or non-empty t";
         },
       },
     });
