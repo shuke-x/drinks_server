@@ -27,6 +27,8 @@ export class User {
   disabledReason!: string | null;
   @Column({ type: "varchar", length: 2048, nullable: true }) avatarUrl!:
     string | null;
+  @Column({ type: "varchar", length: 16, nullable: true })
+  language!: string | null;
   @CreateDateColumn({ type: "timestamptz" }) createdAt!: Date;
   @UpdateDateColumn({ type: "timestamptz" }) updatedAt!: Date;
   @OneToMany(() => RefreshToken, (token) => token.user)

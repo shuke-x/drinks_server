@@ -1,10 +1,12 @@
 import {
   ConflictException,
+  Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { In, Repository } from "typeorm";
+import { In, Not, Repository } from "typeorm";
 import { Cocktail } from "../cocktails/entities/cocktail.entity";
 import { CocktailStatus } from "../cocktails/entities/cocktail.entity";
 import { spiritToBase } from "../cocktails/mappers/spirit.mapper";
@@ -12,8 +14,14 @@ import { CocktailRevision } from "../cocktails/entities/cocktail-revision.entity
 import { Favorite } from "./entities/favorite.entity";
 import { User } from "./entities/user.entity";
 import { UpdateMeDto } from "./dto/update-me.dto";
+import { UserRole } from "../admin/entities/user-role.entity";
+import { STORAGE, StorageProvider } from "../upload/storage.provider";
+import { RedisService } from "../redis/redis.service";
+import { UploadAsset } from "../upload/entities/upload-asset.entity";
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(Favorite)
@@ -22,6 +30,12 @@ export class UsersService {
     private readonly cocktails: Repository<Cocktail>,
     @InjectRepository(CocktailRevision)
     private readonly revisions: Repository<CocktailRevision>,
+    @InjectRepository(UserRole)
+    private readonly userRoles: Repository<UserRole>,
+    @InjectRepository(UploadAsset)
+    private readonly uploadAssets: Repository<UploadAsset>,
+    @Inject(STORAGE) private readonly storage: StorageProvider,
+    private readonly redis: RedisService,
   ) {}
   async me(id: string) {
     const user = await this.users.findOneBy({ id });
@@ -33,6 +47,99 @@ export class UsersService {
     if (!user) throw new NotFoundException("User not found");
     Object.assign(user, dto);
     return this.profile(await this.users.save(user));
+  }
+  async removeMe(id: string) {
+    const user = await this.users.findOneBy({ id });
+    if (!user) throw new NotFoundException("User not found");
+    const isSuperAdmin = await this.userRoles.exists({
+      where: { user: { id }, role: { code: "super_admin" } },
+    });
+    if (isSuperAdmin)
+      throw new ConflictException(
+        "Super administrators cannot delete their own account",
+      );
+
+    const [privateCocktails, allCocktails, ownedAssets, otherUsers] =
+      await Promise.all([
+        this.cocktails.find({
+          where: { owner: { id }, isPrivate: true },
+          withDeleted: true,
+        }),
+        this.cocktails.find({
+          relations: { owner: true },
+          withDeleted: true,
+        }),
+        this.uploadAssets.find({ where: { owner: { id } } }),
+        this.users.find({ where: { id: Not(id) } }),
+      ]);
+    const privateIds = privateCocktails.map((cocktail) => cocktail.id);
+    const privateRevisions = privateIds.length
+      ? await this.revisions.find({
+          where: { cocktail: { id: In(privateIds) } },
+        })
+      : [];
+    const retainedImages = new Set(
+      [
+        ...allCocktails
+          .filter(
+            (cocktail) => cocktail.owner?.id !== id || !cocktail.isPrivate,
+          )
+          .flatMap((cocktail) => cocktail.images ?? []),
+        ...otherUsers.flatMap((other) =>
+          other.avatarUrl ? [other.avatarUrl] : [],
+        ),
+      ],
+    );
+    const filesToRemove = new Set([
+      ...(user.avatarUrl ? [user.avatarUrl] : []),
+      ...ownedAssets.map((asset) => asset.url),
+      ...privateCocktails.flatMap((cocktail) => cocktail.images ?? []),
+      ...privateRevisions.flatMap((revision) =>
+        this.revisionImages(revision.content),
+      ),
+    ]);
+    for (const retained of retainedImages) filesToRemove.delete(retained);
+
+    const ownerDeletedAt = new Date();
+    await this.users.manager.transaction(async (manager) => {
+      await manager.query(
+        `DELETE FROM "cocktails" WHERE "ownerId" = $1 AND "isPrivate" = true`,
+        [id],
+      );
+      await manager.query(
+        `UPDATE "cocktails" SET "ownerDeletedAt" = $1 WHERE "ownerId" = $2 AND "isPrivate" = false`,
+        [ownerDeletedAt, id],
+      );
+      const result = await manager.delete(User, { id });
+      if (!result.affected) throw new NotFoundException("User not found");
+    });
+
+    const [cacheResults, cleanupResults] = await Promise.all([
+      Promise.allSettled([
+        this.redis.del("list:v1:*"),
+        this.redis.del("list:v2:*"),
+        this.redis.del("list:v3:*"),
+        this.redis.del("rec:v1:*"),
+      ]),
+      Promise.allSettled(
+        [...filesToRemove].map((url) => this.storage.remove(url)),
+      ),
+    ]);
+    const cacheFailures = cacheResults.filter(
+      (result) => result.status === "rejected",
+    ).length;
+    if (cacheFailures)
+      this.logger.warn(
+        `Account ${id} was deleted, but ${cacheFailures} cache entries could not be invalidated`,
+      );
+    const cleanupFailures = cleanupResults.filter(
+      (result) => result.status === "rejected",
+    ).length;
+    if (cleanupFailures)
+      this.logger.warn(
+        `Account ${id} was deleted, but ${cleanupFailures} image files could not be removed`,
+      );
+    return { success: true };
   }
   async myCocktails(userId: string) {
     const cocktails = await this.cocktails.find({
@@ -107,8 +214,16 @@ export class UsersService {
       email: user.email,
       name: user.name,
       avatarUrl: user.avatarUrl,
+      language: user.language,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
+  }
+  private revisionImages(content: object): string[] {
+    if (!content || typeof content !== "object") return [];
+    const images = (content as { images?: unknown }).images;
+    return Array.isArray(images)
+      ? images.filter((image): image is string => typeof image === "string")
+      : [];
   }
 }

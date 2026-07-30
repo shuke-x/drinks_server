@@ -3,6 +3,8 @@ import {
   Controller,
   Inject,
   Post,
+  Query,
+  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -14,11 +16,23 @@ import { STORAGE, StorageProvider } from "./storage.provider";
 import { AccessTokenGuard } from "../auth/access-token.guard";
 import { RateLimit } from "../../common/security/rate-limit.decorator";
 import { RedisRateLimitGuard } from "../../common/security/redis-rate-limit.guard";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { UploadAsset } from "./entities/upload-asset.entity";
+import { Request } from "express";
+import { User } from "../users/entities/user.entity";
+import { UploadImageQueryDto } from "./dto/upload-image-query.dto";
+
+type AuthRequest = Request & { authUser: { id: string; email: string } };
 @ApiTags("upload")
 @ApiBearerAuth("access-token")
 @Controller("upload")
 export class UploadController {
-  constructor(@Inject(STORAGE) private readonly storage: StorageProvider) {}
+  constructor(
+    @Inject(STORAGE) private readonly storage: StorageProvider,
+    @InjectRepository(UploadAsset)
+    private readonly assets: Repository<UploadAsset>,
+  ) {}
   @Post("image")
   @RateLimit({
     scope: "upload-image",
@@ -37,7 +51,7 @@ export class UploadController {
   @UseInterceptors(
     FileInterceptor("file", {
       limits: {
-        fileSize: 5 * 1024 * 1024,
+        fileSize: 15 * 1024 * 1024,
         files: 1,
         fields: 0,
         parts: 1,
@@ -52,8 +66,26 @@ export class UploadController {
       },
     }),
   )
-  async image(@UploadedFile() file?: Express.Multer.File) {
+  async image(
+    @Req() request: AuthRequest,
+    @UploadedFile() file?: Express.Multer.File,
+    @Query() query: UploadImageQueryDto = {},
+  ) {
     if (!file) throw new BadRequestException("file is required");
-    return { url: await this.storage.save(file) };
+    const url = await this.storage.save(file, {
+      purpose: query.purpose ?? "cocktail",
+    });
+    try {
+      await this.assets.save(
+        this.assets.create({
+          url,
+          owner: { id: request.authUser.id } as User,
+        }),
+      );
+    } catch (error) {
+      await this.storage.remove(url).catch(() => undefined);
+      throw error;
+    }
+    return { url };
   }
 }

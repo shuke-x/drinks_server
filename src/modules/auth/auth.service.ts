@@ -23,14 +23,7 @@ import { UserStatus } from "../users/entities/user.entity";
 import { RefreshToken } from "./entities/refresh-token.entity";
 import { UserRole } from "../admin/entities/user-role.entity";
 import { RolePermission } from "../admin/entities/role-permission.entity";
-
-// Kept as a runtime dependency so production always uses the native Argon2id implementation.
-// `require` also keeps TypeScript builds usable before `pnpm install` has fetched the package.
-const argon2 = require("argon2") as {
-  argon2id: number;
-  hash(password: string, options: object): Promise<string>;
-  verify(hash: string, password: string): Promise<boolean>;
-};
+import { hashPassword, verifyPasswordHash } from "./password-hash.util";
 
 type Challenge = { nonce: string; expiresAt: string };
 type Credentials = {
@@ -104,12 +97,7 @@ export class AuthService {
     const user = await this.users.save(
       this.users.create({
         email,
-        passwordHash: await argon2.hash(payload.password, {
-          type: argon2.argon2id,
-          memoryCost: 19456,
-          timeCost: 2,
-          parallelism: 1,
-        }),
+        passwordHash: await hashPassword(payload.password),
         name: payload.name?.trim() || email.split("@")[0],
         avatarUrl: null,
       }),
@@ -125,7 +113,7 @@ export class AuthService {
         email: payload.email.trim().toLowerCase(),
       })
       .getOne();
-    if (!user || !(await argon2.verify(user.passwordHash, payload.password)))
+    if (!user || !(await verifyPasswordHash(user.passwordHash, payload.password)))
       throw new UnauthorizedException("Invalid email or password");
     if (user.status === UserStatus.DISABLED)
       throw new UnauthorizedException("User account is disabled");
@@ -177,6 +165,7 @@ export class AuthService {
         email: user.email,
         name: user.name,
         avatarUrl: user.avatarUrl,
+        language: user.language,
         status: user.status,
         roles,
       },

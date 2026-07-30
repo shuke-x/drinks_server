@@ -56,6 +56,9 @@ export class Cocktail {
   @Index()
   @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
   owner!: User | null;
+  /** Set before a deleted account is detached from a retained public cocktail. */
+  @Column({ type: "timestamptz", nullable: true })
+  ownerDeletedAt!: Date | null;
   @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
   reviewer!: User | null;
   @CreateDateColumn({ type: "timestamptz" }) createdAt!: Date;

@@ -77,3 +77,49 @@ describe("CocktailsService published revisions", () => {
     expect(result.revision.status).toBe(CocktailStatus.PENDING);
   });
 });
+
+describe("CocktailsService publisher", () => {
+  it("marks a retained cocktail publisher as deleted", async () => {
+    const repo = {
+      findAndCount: jest.fn().mockResolvedValue([
+        [
+          {
+            id: "cocktail-1",
+            zh: "保留酒单",
+            en: "Retained",
+            spirit: "gin",
+            category: { id: "category-1", code: "gin", name: "金酒" },
+            isOfficial: false,
+            isPrivate: false,
+            status: CocktailStatus.PUBLISHED,
+            owner: null,
+            reviewer: null,
+            ownerDeletedAt: new Date("2026-07-30T00:00:00.000Z"),
+          },
+        ],
+        1,
+      ]),
+    };
+    const redis = {
+      get: jest.fn().mockResolvedValue(null),
+      withTTL: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new CocktailsService(
+      repo as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      redis as any,
+    );
+
+    const result: any = await service.list({ page: 1, limit: 10 });
+
+    expect(result.data[0].publisher).toEqual({
+      id: null,
+      name: "该账户已注销",
+      avatarUrl: null,
+      deleted: true,
+    });
+  });
+});

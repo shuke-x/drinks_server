@@ -52,11 +52,26 @@ export class CocktailsService {
   ) {}
 
   private out(x: Cocktail) {
-    const { owner, reviewer, category, ...safe } = x;
+    const { owner, ownerDeletedAt, reviewer, category, ...safe } = x;
     return {
       ...safe,
       category,
       base: category?.name ?? spiritToBase(x.spirit),
+      publisher: owner
+        ? {
+            id: owner.id,
+            name: owner.name,
+            avatarUrl: owner.avatarUrl,
+            deleted: false,
+          }
+        : ownerDeletedAt
+          ? {
+              id: null,
+              name: "该账户已注销",
+              avatarUrl: null,
+              deleted: true,
+            }
+          : null,
       deletedAt: undefined,
     };
   }
@@ -76,7 +91,7 @@ export class CocktailsService {
         status: CocktailStatus.PUBLISHED,
         ...(category ? { category: { id: category.id } } : {}),
       },
-      relations: { category: true },
+      relations: { category: true, owner: true },
       order: { createdAt: "ASC" },
       skip: (q.page - 1) * q.limit,
       take: q.limit,
@@ -296,6 +311,7 @@ export class CocktailsService {
     const qb = this.repo
       .createQueryBuilder("c")
       .leftJoinAndSelect("c.category", "category")
+      .leftJoinAndSelect("c.owner", "owner")
       .where("c.isPrivate = false AND c.status = :status", {
         status: CocktailStatus.PUBLISHED,
       });

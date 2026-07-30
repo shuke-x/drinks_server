@@ -42,6 +42,15 @@ export class UsersController {
   update(@Req() req: AuthRequest, @Body() dto: UpdateMeDto) {
     return this.users.updateMe(req.authUser.id, dto);
   }
+  @Delete()
+  @ApiOperation({ summary: "删除当前账号" })
+  @ApiOkResponse({
+    description:
+      "永久删除当前用户，并撤销刷新令牌、清理收藏和角色关联。超级管理员不能通过此接口自删。",
+  })
+  remove(@Req() req: AuthRequest) {
+    return this.users.removeMe(req.authUser.id);
+  }
   @Get("cocktails")
   @ApiOperation({ summary: "获取当前用户创建的酒单" })
   cocktails(@Req() req: AuthRequest) {
