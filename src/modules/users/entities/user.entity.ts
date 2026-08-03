@@ -12,6 +12,10 @@ export enum UserStatus {
   ACTIVE = "active",
   DISABLED = "disabled",
 }
+export enum UserAccountSource {
+  APP = "app",
+  ADMIN = "admin",
+}
 
 @Entity("users")
 export class User {
@@ -22,6 +26,12 @@ export class User {
   @Column({ length: 64 }) name!: string;
   @Column({ type: "enum", enum: UserStatus, default: UserStatus.ACTIVE })
   status!: UserStatus;
+  @Column({
+    type: "enum",
+    enum: UserAccountSource,
+    default: UserAccountSource.APP,
+  })
+  accountSource!: UserAccountSource;
   @Column({ type: "timestamptz", nullable: true }) disabledAt!: Date | null;
   @Column({ type: "varchar", length: 255, nullable: true })
   disabledReason!: string | null;

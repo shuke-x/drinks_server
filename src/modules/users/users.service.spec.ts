@@ -13,7 +13,7 @@ describe("UsersService.removeMe", () => {
       transaction: jest.fn((callback) => callback(manager)),
     },
   };
-  const cocktails = { find: jest.fn() };
+  const cocktails = { find: jest.fn(), findAndCount: jest.fn() };
   const revisions = { find: jest.fn() };
   const userRoles = { exists: jest.fn() };
   const uploadAssets = { find: jest.fn() };
@@ -76,6 +76,45 @@ describe("UsersService.removeMe", () => {
       ConflictException,
     );
     expect(users.manager.transaction).not.toHaveBeenCalled();
+  });
+
+  it("allows the admin workflow to delete another super administrator", async () => {
+    users.findOneBy.mockResolvedValue({ id: "admin-2", avatarUrl: null });
+    userRoles.exists.mockResolvedValue(true);
+
+    await expect(service.removeByAdmin("admin-2")).resolves.toEqual({
+      success: true,
+    });
+    expect(manager.delete).toHaveBeenCalledWith(expect.any(Function), {
+      id: "admin-2",
+    });
+  });
+
+  it("paginates and filters cocktails created by the current user", async () => {
+    cocktails.findAndCount.mockResolvedValue([
+      [
+        {
+          id: "draft-1",
+          spirit: "gin",
+          category: { name: "金酒" },
+          status: "draft",
+        },
+      ],
+      3,
+    ]);
+    revisions.find.mockResolvedValue([]);
+
+    const result: any = await service.myCocktails("user-1", {
+      page: 2,
+      limit: 1,
+      status: "draft" as any,
+    });
+
+    expect(cocktails.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 1, take: 1 }),
+    );
+    expect(result.meta).toEqual({ page: 2, limit: 1, total: 3 });
+    expect(result.data[0].base).toBe("金酒");
   });
 
   it("removes images used only by private cocktails", async () => {

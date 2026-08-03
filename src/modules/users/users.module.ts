@@ -27,5 +27,6 @@ import { UploadAsset } from "../upload/entities/upload-asset.entity";
   ],
   controllers: [UsersController],
   providers: [UsersService],
+  exports: [UsersService],
 })
 export class UsersModule {}

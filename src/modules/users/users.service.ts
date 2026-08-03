@@ -14,6 +14,7 @@ import { CocktailRevision } from "../cocktails/entities/cocktail-revision.entity
 import { Favorite } from "./entities/favorite.entity";
 import { User } from "./entities/user.entity";
 import { UpdateMeDto } from "./dto/update-me.dto";
+import { QueryMyCocktailsDto } from "./dto/query-my-cocktails.dto";
 import { UserRole } from "../admin/entities/user-role.entity";
 import { STORAGE, StorageProvider } from "../upload/storage.provider";
 import { RedisService } from "../redis/redis.service";
@@ -49,12 +50,18 @@ export class UsersService {
     return this.profile(await this.users.save(user));
   }
   async removeMe(id: string) {
+    return this.removeAccount(id, false);
+  }
+  async removeByAdmin(id: string) {
+    return this.removeAccount(id, true);
+  }
+  private async removeAccount(id: string, allowSuperAdmin: boolean) {
     const user = await this.users.findOneBy({ id });
     if (!user) throw new NotFoundException("User not found");
     const isSuperAdmin = await this.userRoles.exists({
       where: { user: { id }, role: { code: "super_admin" } },
     });
-    if (isSuperAdmin)
+    if (isSuperAdmin && !allowSuperAdmin)
       throw new ConflictException(
         "Super administrators cannot delete their own account",
       );
@@ -120,6 +127,7 @@ export class UsersService {
         this.redis.del("list:v2:*"),
         this.redis.del("list:v3:*"),
         this.redis.del("rec:v1:*"),
+        this.redis.del("daily-recommendations:v1:*"),
       ]),
       Promise.allSettled(
         [...filesToRemove].map((url) => this.storage.remove(url)),
@@ -141,11 +149,16 @@ export class UsersService {
       );
     return { success: true };
   }
-  async myCocktails(userId: string) {
-    const cocktails = await this.cocktails.find({
-      where: { owner: { id: userId } },
+  async myCocktails(userId: string, query: QueryMyCocktailsDto) {
+    const [cocktails, total] = await this.cocktails.findAndCount({
+      where: {
+        owner: { id: userId },
+        ...(query.status ? { status: query.status } : {}),
+      },
       relations: { category: true },
-      order: { createdAt: "DESC" },
+      order: { createdAt: "DESC", id: "ASC" },
+      skip: (query.page - 1) * query.limit,
+      take: query.limit,
     });
     const revisions = cocktails.length
       ? await this.revisions.find({
@@ -159,12 +172,16 @@ export class UsersService {
       const cocktailId = revision.cocktail?.id;
       if (cocktailId && !latest.has(cocktailId)) latest.set(cocktailId, revision);
     }
-    return cocktails.map(({ owner, ...cocktail }) => ({
-      ...cocktail,
-      base: cocktail.category?.name ?? spiritToBase(cocktail.spirit),
-      latestRevision: latest.get(cocktail.id) ?? null,
-      deletedAt: undefined,
-    }));
+    return {
+      __paged: true,
+      data: cocktails.map(({ owner, ...cocktail }) => ({
+        ...cocktail,
+        base: cocktail.category?.name ?? spiritToBase(cocktail.spirit),
+        latestRevision: latest.get(cocktail.id) ?? null,
+        deletedAt: undefined,
+      })),
+      meta: { page: query.page, limit: query.limit, total },
+    };
   }
   async listFavorites(userId: string) {
     const rows = await this.favorites.find({

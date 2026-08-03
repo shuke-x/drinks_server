@@ -18,8 +18,11 @@ import {
 } from "crypto";
 import { Repository } from "typeorm";
 import { RedisService } from "../redis/redis.service";
-import { User } from "../users/entities/user.entity";
-import { UserStatus } from "../users/entities/user.entity";
+import {
+  User,
+  UserAccountSource,
+  UserStatus,
+} from "../users/entities/user.entity";
 import { RefreshToken } from "./entities/refresh-token.entity";
 import { UserRole } from "../admin/entities/user-role.entity";
 import { RolePermission } from "../admin/entities/role-permission.entity";
@@ -100,6 +103,7 @@ export class AuthService {
         passwordHash: await hashPassword(payload.password),
         name: payload.name?.trim() || email.split("@")[0],
         avatarUrl: null,
+        accountSource: UserAccountSource.APP,
       }),
     );
     return this.issueTokens(user);

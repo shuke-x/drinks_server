@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsEmail,
   IsEnum,
   IsInt,
   IsOptional,
@@ -14,14 +15,27 @@ import {
 } from "class-validator";
 import { PaginationDto } from "../../../common/dto/pagination.dto";
 import { CocktailStatus } from "../../cocktails/entities/cocktail.entity";
-import { UserStatus } from "../../users/entities/user.entity";
+import { UserAccountSource, UserStatus } from "../../users/entities/user.entity";
 export class AdminCocktailQueryDto extends PaginationDto {
   @IsOptional() @IsEnum(CocktailStatus) status?: CocktailStatus;
   @IsOptional() @IsUUID() ownerId?: string;
   @IsOptional() @IsString() @Length(1, 64) spirit?: string;
   @IsOptional() @IsString() @Length(1, 128) search?: string;
 }
-export class AdminUserQueryDto extends PaginationDto { @IsOptional() @IsEnum(UserStatus) status?: UserStatus; @IsOptional() @IsString() search?: string; }
+export class AdminUserQueryDto extends PaginationDto {
+  @IsOptional() @IsEnum(UserStatus) status?: UserStatus;
+  @IsOptional() @IsEnum(UserAccountSource) accountSource?: UserAccountSource;
+  @IsOptional() @IsString() search?: string;
+}
+export class CreateAdminUserDto {
+  @IsEmail() @MaxLength(254) email!: string;
+  @IsString() @Length(1, 64) name!: string;
+  @IsString()
+  @MaxLength(128)
+  @Matches(/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9\s]).{8,}$/)
+  password!: string;
+  @IsOptional() @IsArray() @IsUUID("4", { each: true }) roleIds?: string[];
+}
 export class AdminAuditQueryDto extends PaginationDto {
   @IsOptional() @IsString() @Length(1, 64) targetType?: string;
   @IsOptional() @IsString() @Length(1, 96) action?: string;
@@ -44,6 +58,16 @@ export class CreateRoleDto {
   @IsString() @Length(1, 128) name!: string;
   @IsOptional() @IsString() @MaxLength(2000) description?: string;
   @IsOptional() @IsArray() @IsUUID("4", { each: true }) permissionIds?: string[];
+}
+export class CreatePermissionDto {
+  @IsString()
+  @Length(3, 96)
+  @Matches(/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/)
+  code!: string;
+
+  @IsString()
+  @Length(1, 128)
+  name!: string;
 }
 export class UpdateRoleDto {
   @IsOptional() @IsString() @Length(1, 128) name?: string;

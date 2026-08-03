@@ -23,6 +23,10 @@ import { AdminCategoriesController } from "./admin-categories.controller";
 import { AdminCategoriesService } from "./admin-categories.service";
 import { CocktailRevision } from "../cocktails/entities/cocktail-revision.entity";
 import { AdminRevisionsService } from "./admin-revisions.service";
+import { DailyRecommendation } from "../cocktails/entities/daily-recommendation.entity";
+import { AdminDailyRecommendationsController } from "./admin-daily-recommendations.controller";
+import { AdminDailyRecommendationsService } from "./admin-daily-recommendations.service";
+import { UsersModule } from "../users/users.module";
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -37,11 +41,13 @@ import { AdminRevisionsService } from "./admin-revisions.service";
       AdminImportJob,
       CocktailCategory,
       CocktailRevision,
+      DailyRecommendation,
     ]),
     AuthModule,
     RedisModule,
+    UsersModule,
   ],
-  controllers: [AdminController, ImportJobsController, AdminCategoriesController],
+  controllers: [AdminController, ImportJobsController, AdminCategoriesController, AdminDailyRecommendationsController],
   providers: [
     AdminService,
     PermissionsGuard,
@@ -50,6 +56,7 @@ import { AdminRevisionsService } from "./admin-revisions.service";
     CocktailCategoriesService,
     AdminCategoriesService,
     AdminRevisionsService,
+    AdminDailyRecommendationsService,
   ],
 })
 export class AdminModule {}

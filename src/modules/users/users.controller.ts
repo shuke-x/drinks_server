@@ -5,6 +5,7 @@ import {
   Get,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -19,6 +20,7 @@ import { Request } from "express";
 import { AccessTokenGuard } from "../auth/access-token.guard";
 import { FavoriteDto } from "./dto/favorite.dto";
 import { UpdateMeDto } from "./dto/update-me.dto";
+import { QueryMyCocktailsDto } from "./dto/query-my-cocktails.dto";
 import { UsersService } from "./users.service";
 
 type AuthRequest = Request & { authUser: { id: string; email: string } };
@@ -53,8 +55,8 @@ export class UsersController {
   }
   @Get("cocktails")
   @ApiOperation({ summary: "获取当前用户创建的酒单" })
-  cocktails(@Req() req: AuthRequest) {
-    return this.users.myCocktails(req.authUser.id);
+  cocktails(@Req() req: AuthRequest, @Query() query: QueryMyCocktailsDto) {
+    return this.users.myCocktails(req.authUser.id, query);
   }
   @Get("favorites")
   @ApiOperation({ summary: "获取当前用户收藏的酒单" })

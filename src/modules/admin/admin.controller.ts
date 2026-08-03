@@ -9,6 +9,8 @@ import {
   AdminCocktailQueryDto,
   AdminUpdateCocktailDto,
   AdminUserQueryDto,
+  CreateAdminUserDto,
+  CreatePermissionDto,
   CreateRoleDto,
   ReplaceUserRolesDto,
   ReviewDto,
@@ -22,7 +24,9 @@ type AuthRequest = Request & { authUser: { id: string } };
 export class AdminController {
   constructor(private readonly admin: AdminService, private readonly revisions: AdminRevisionsService) {}
   @Get("users") @RequirePermissions("users.read") users(@Query() q: AdminUserQueryDto) { return this.admin.usersList(q); }
+  @Post("users") @RequirePermissions("users.create") createUser(@Req() r: AuthRequest, @Body() dto: CreateAdminUserDto) { return this.admin.createUser(r.authUser.id, dto); }
   @Get("users/:id") @RequirePermissions("users.read") user(@Param("id") id: string) { return this.admin.userDetail(id); }
+  @Delete("users/:id") @RequirePermissions("users.delete") deleteUser(@Req() r: AuthRequest, @Param("id") id: string) { return this.admin.removeUser(r.authUser.id, id); }
   @Patch("users/:id/status") @RequirePermissions("users.update_status") status(@Req() r: AuthRequest, @Param("id") id: string, @Body() dto: UpdateUserStatusDto) { return this.admin.setUserStatus(r.authUser.id, id, dto); }
   @Put("users/:id/roles") @RequirePermissions("users.assign_roles") roles(@Req() r: AuthRequest, @Param("id") id: string, @Body() dto: ReplaceUserRolesDto) { return this.admin.replaceRoles(r.authUser.id, id, dto.roleIds); }
   @Get("cocktails") @RequirePermissions("cocktails.read") cocktails(@Query() q: AdminCocktailQueryDto) { return this.admin.cocktailsList(q); }
@@ -37,6 +41,7 @@ export class AdminController {
   @Delete("cocktails/:id") @RequirePermissions("cocktails.delete") remove(@Req() r: AuthRequest, @Param("id") id: string) { return this.admin.removeCocktail(r.authUser.id, id); }
   @Get("audit-logs") @RequirePermissions("audit_logs.read") auditLogs(@Query() q: AdminAuditQueryDto) { return this.admin.auditLogs(q); }
   @Get("roles") @RequirePermissions("roles.read") rolesList() { return this.admin.listRoles(); }
+  @Post("permissions") @RequirePermissions("roles.manage") createPermission(@Req() r: AuthRequest, @Body() dto: CreatePermissionDto) { return this.admin.createPermission(r.authUser.id, dto); }
   @Post("roles") @RequirePermissions("roles.manage") createRole(@Req() r: AuthRequest, @Body() dto: CreateRoleDto) { return this.admin.createRole(r.authUser.id, dto); }
   @Patch("roles/:id") @RequirePermissions("roles.manage") updateRole(@Req() r: AuthRequest, @Param("id") id: string, @Body() dto: UpdateRoleDto) { return this.admin.updateRole(r.authUser.id, id, dto); }
 }

@@ -32,6 +32,9 @@ export class CocktailsController {
   @Get("recommendations") recommendations() {
     return this.service.recommendations();
   }
+  @Get("today-recommendations") todayRecommendations() {
+    return this.service.todayRecommendations();
+  }
   @Get("random") random(@Query("spirit", NormalizeSpiritPipe) spirit?: string) {
     return this.service.random(spirit);
   }

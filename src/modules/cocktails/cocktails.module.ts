@@ -10,8 +10,9 @@ import { CocktailCategoriesService } from "./cocktail-categories.service";
 import { CocktailRevision } from "./entities/cocktail-revision.entity";
 import { CocktailsController } from "./cocktails.controller";
 import { CocktailsService } from "./cocktails.service";
+import { DailyRecommendation } from "./entities/daily-recommendation.entity";
 @Module({
-  imports: [TypeOrmModule.forFeature([Cocktail, CocktailCategory, CocktailReviewLog, CocktailRevision, User]), AuthModule],
+  imports: [TypeOrmModule.forFeature([Cocktail, CocktailCategory, CocktailReviewLog, CocktailRevision, DailyRecommendation, User]), AuthModule],
   controllers: [CocktailsController, CocktailCategoriesController],
   providers: [CocktailsService, CocktailCategoriesService],
   exports: [CocktailsService, CocktailCategoriesService],

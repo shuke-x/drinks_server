@@ -40,6 +40,7 @@ describe("CocktailsService published revisions", () => {
       { findOneBy: jest.fn().mockResolvedValue(owner) } as any,
       {} as any,
       {} as any,
+      {} as any,
     );
     const result: any = await service.update(
       cocktail.id,
@@ -70,6 +71,7 @@ describe("CocktailsService published revisions", () => {
         create: jest.fn((value) => value),
         save: jest.fn(async (value) => value),
       } as any,
+      {} as any,
       {} as any,
     );
     const result: any = await service.submit(cocktail.id, owner.id);
@@ -106,6 +108,7 @@ describe("CocktailsService publisher", () => {
     };
     const service = new CocktailsService(
       repo as any,
+      {} as any,
       {} as any,
       {} as any,
       {} as any,

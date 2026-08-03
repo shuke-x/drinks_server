@@ -14,6 +14,7 @@ import { UpdateCocktailDto } from "./dto/update-cocktail.dto";
 import { CocktailCategory } from "./entities/cocktail-category.entity";
 import { CocktailReviewLog } from "./entities/cocktail-review-log.entity";
 import { CocktailRevision } from "./entities/cocktail-revision.entity";
+import { DailyRecommendation } from "./entities/daily-recommendation.entity";
 import {
   Cocktail,
   CocktailStatus,
@@ -48,6 +49,8 @@ export class CocktailsService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(CocktailReviewLog)
     private readonly reviewLogs: Repository<CocktailReviewLog>,
+    @InjectRepository(DailyRecommendation)
+    private readonly dailyRecommendations: Repository<DailyRecommendation>,
     private readonly redis: RedisService,
   ) {}
 
@@ -80,9 +83,10 @@ export class CocktailsService {
     const category = q.spirit
       ? await this.resolveCategory(q.spirit, false)
       : null;
+    const cacheKey = `list:v4:p${q.page}:l${q.limit}`;
     const cache =
       !q.spirit && q.page === 1
-        ? await this.redis.get<any>("list:v3:p1")
+        ? await this.redis.get<any>(cacheKey)
         : null;
     if (cache) return cache;
     const [rows, total] = await this.repo.findAndCount({
@@ -92,7 +96,7 @@ export class CocktailsService {
         ...(category ? { category: { id: category.id } } : {}),
       },
       relations: { category: true, owner: true },
-      order: { createdAt: "ASC" },
+      order: { createdAt: "ASC", id: "ASC" },
       skip: (q.page - 1) * q.limit,
       take: q.limit,
     });
@@ -102,7 +106,7 @@ export class CocktailsService {
       meta: { page: q.page, limit: q.limit, total },
     };
     if (!q.spirit && q.page === 1)
-      await this.redis.withTTL("list:v3:p1", result, 60);
+      await this.redis.withTTL(cacheKey, result, 60);
     return result;
   }
 
@@ -357,6 +361,35 @@ export class CocktailsService {
     return data;
   }
 
+  async todayRecommendations() {
+    const timeZone = process.env.APP_TIME_ZONE || "Asia/Hong_Kong";
+    const date = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const key = `daily-recommendations:v1:${date}`;
+    const hit = await this.redis.get<{ date: string; items: any[] }>(key);
+    if (hit) return hit;
+    const rows = await this.dailyRecommendations
+      .createQueryBuilder("recommendation")
+      .innerJoinAndSelect("recommendation.cocktail", "cocktail")
+      .leftJoinAndSelect("cocktail.category", "category")
+      .leftJoinAndSelect("cocktail.owner", "owner")
+      .where("recommendation.recommendationDate = :date", { date })
+      .andWhere("cocktail.isPrivate = false")
+      .andWhere("cocktail.status = :status", { status: CocktailStatus.PUBLISHED })
+      .andWhere("cocktail.deletedAt IS NULL")
+      .orderBy("recommendation.sortOrder", "ASC")
+      .getMany();
+    const configured = rows.map((row) => this.out(row.cocktail));
+    const items = configured.length ? configured : await this.recommendations();
+    const result = { date, items };
+    await this.redis.withTTL(key, result, 300);
+    return result;
+  }
+
   private async savePublishedRevision(
     cocktail: Cocktail,
     dto: UpdateCocktailDto,
@@ -471,7 +504,9 @@ export class CocktailsService {
       this.redis.del("list:v1:*"),
       this.redis.del("list:v2:*"),
       this.redis.del("list:v3:*"),
+      this.redis.del("list:v4:*"),
       this.redis.del("rec:v1:*"),
+      this.redis.del("daily-recommendations:v1:*"),
     ]);
   }
 }

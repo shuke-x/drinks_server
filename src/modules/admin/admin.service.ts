@@ -14,12 +14,20 @@ import { CocktailCategory } from "../cocktails/entities/cocktail-category.entity
 import { CocktailReviewLog } from "../cocktails/entities/cocktail-review-log.entity";
 import { CocktailRevision } from "../cocktails/entities/cocktail-revision.entity";
 import { RedisService } from "../redis/redis.service";
-import { User, UserStatus } from "../users/entities/user.entity";
+import {
+  User,
+  UserAccountSource,
+  UserStatus,
+} from "../users/entities/user.entity";
+import { UsersService } from "../users/users.service";
+import { hashPassword } from "../auth/password-hash.util";
 import {
   AdminAuditQueryDto,
   AdminCocktailQueryDto,
   AdminUpdateCocktailDto,
   AdminUserQueryDto,
+  CreateAdminUserDto,
+  CreatePermissionDto,
   CreateRoleDto,
   UpdateRoleDto,
   UpdateUserStatusDto,
@@ -50,12 +58,102 @@ export class AdminService {
     @InjectRepository(RolePermission)
     private readonly rolePermissions: Repository<RolePermission>,
     private readonly redis: RedisService,
+    private readonly usersService: UsersService,
   ) {}
+
+  async createUser(actorId: string, dto: CreateAdminUserDto) {
+    const email = dto.email.trim().toLowerCase();
+    if (await this.users.exists({ where: { email } }))
+      throw new ConflictException("Email is already registered");
+    const roles = await this.resolveRoles(dto.roleIds ?? []);
+    const actor = await this.users.findOneBy({ id: actorId });
+    if (!actor) throw new NotFoundException("Administrator not found");
+    const actorIsSuperAdmin = await this.userRoles.exists({
+      where: { user: { id: actorId }, role: { code: "super_admin" } },
+    });
+    if (
+      !actorIsSuperAdmin &&
+      roles.some((role) => role.code !== "user")
+    )
+      throw new ConflictException(
+        "Only super admins can create administrator accounts",
+      );
+    const passwordHash = await hashPassword(dto.password);
+    return this.dataSource.transaction(async (manager) => {
+      const user = await manager.save(
+        manager.create(User, {
+          email,
+          passwordHash,
+          name: dto.name.trim(),
+          status: UserStatus.ACTIVE,
+          accountSource: UserAccountSource.ADMIN,
+          avatarUrl: null,
+          disabledAt: null,
+          disabledReason: null,
+        }),
+      );
+      if (roles.length)
+        await manager.save(
+          UserRole,
+          roles.map((role) =>
+            manager.create(UserRole, { user, role, assignedBy: actor }),
+          ),
+        );
+      await this.audit(
+        manager,
+        actorId,
+        "users.create",
+        "user",
+        user.id,
+        null,
+        { email: user.email, name: user.name, roleIds: roles.map((role) => role.id) },
+      );
+      const { passwordHash: _passwordHash, ...safeUser } = user;
+      return { ...safeUser, roles };
+    });
+  }
+
+  async removeUser(actorId: string, id: string) {
+    if (actorId === id)
+      throw new ConflictException("You cannot delete your own account");
+    const [actorIsSuperAdmin, user, targetRoles] = await Promise.all([
+      this.userRoles.exists({
+        where: { user: { id: actorId }, role: { code: "super_admin" } },
+      }),
+      this.users.findOneBy({ id }),
+      this.userRoles.find({ where: { user: { id } }, relations: { role: true } }),
+    ]);
+    if (!actorIsSuperAdmin)
+      throw new ConflictException("Only super admins can delete users");
+    if (!user) throw new NotFoundException("User not found");
+    if (targetRoles.some((item) => item.role.code === "super_admin")) {
+      const superAdminCount = await this.userRoles.count({
+        where: { role: { code: "super_admin" } },
+      });
+      if (superAdminCount <= 1)
+        throw new ConflictException("The last super admin cannot be deleted");
+    }
+    const before = {
+      email: user.email,
+      name: user.name,
+      status: user.status,
+      roleIds: targetRoles.map((item) => item.role.id),
+    };
+    await this.usersService.removeByAdmin(id);
+    await this.dataSource.transaction((manager) =>
+      this.audit(manager, actorId, "users.delete", "user", id, before, null),
+    );
+    return { id };
+  }
 
   async usersList(query: AdminUserQueryDto) {
     const builder = this.users.createQueryBuilder("user");
     if (query.status)
       builder.where("user.status = :status", { status: query.status });
+    if (query.accountSource)
+      builder.andWhere("user.accountSource = :accountSource", {
+        accountSource: query.accountSource,
+      });
     if (query.search)
       builder.andWhere("(user.email ILIKE :search OR user.name ILIKE :search)", {
         search: `%${query.search}%`,
@@ -65,23 +163,38 @@ export class AdminService {
       .skip((query.page - 1) * query.limit)
       .take(query.limit)
       .getManyAndCount();
-    const assignments = users.length
-      ? await this.userRoles.find({
-          where: { user: { id: In(users.map((user) => user.id)) } },
-          relations: { user: true, role: true },
-        })
-      : [];
+    const [assignments, cocktailCounts] = users.length
+      ? await Promise.all([
+          this.userRoles.find({
+            where: { user: { id: In(users.map((user) => user.id)) } },
+            relations: { user: true, role: true },
+          }),
+          this.cocktails
+            .createQueryBuilder("cocktail")
+            .select('cocktail."ownerId"', "userId")
+            .addSelect("COUNT(*)", "count")
+            .where('cocktail."ownerId" IN (:...userIds)', {
+              userIds: users.map((user) => user.id),
+            })
+            .groupBy('cocktail."ownerId"')
+            .getRawMany<{ userId: string; count: string }>(),
+        ])
+      : [[], []];
     const rolesByUser = new Map<string, Role[]>();
     for (const assignment of assignments) {
       const roles = rolesByUser.get(assignment.user.id) ?? [];
       roles.push(assignment.role);
       rolesByUser.set(assignment.user.id, roles);
     }
+    const cocktailCountByUser = new Map(
+      cocktailCounts.map((item) => [item.userId, Number(item.count)]),
+    );
     return {
       __paged: true,
       data: users.map((user) => ({
         ...user,
         roles: rolesByUser.get(user.id) ?? [],
+        cocktailCount: cocktailCountByUser.get(user.id) ?? 0,
       })),
       meta: { page: query.page, limit: query.limit, total },
     };
@@ -307,6 +420,40 @@ export class AdminService {
         { ...role, permissionIds: permissions.map((item) => item.id) },
       );
       return role;
+    });
+  }
+
+  async createPermission(actorId: string, dto: CreatePermissionDto) {
+    const code = dto.code.trim();
+    const name = dto.name.trim();
+    if (await this.permissions.exists({ where: { code } }))
+      throw new ConflictException("Permission code already exists");
+
+    return this.dataSource.transaction(async (manager) => {
+      const permission = await manager.save(
+        manager.create(Permission, { code, name }),
+      );
+      const superAdmin = await manager.findOneBy(Role, {
+        code: "super_admin",
+      });
+      if (!superAdmin)
+        throw new ConflictException("Super admin role does not exist");
+      await manager.save(
+        manager.create(RolePermission, {
+          role: superAdmin,
+          permission,
+        }),
+      );
+      await this.audit(
+        manager,
+        actorId,
+        "permissions.create",
+        "permission",
+        permission.id,
+        null,
+        permission,
+      );
+      return permission;
     });
   }
 
@@ -549,6 +696,16 @@ export class AdminService {
     return permissions;
   }
 
+  private async resolveRoles(roleIds: string[]) {
+    const uniqueIds = [...new Set(roleIds)];
+    const roles = uniqueIds.length
+      ? await this.roles.findBy({ id: In(uniqueIds) })
+      : [];
+    if (roles.length !== uniqueIds.length)
+      throw new BadRequestException("One or more roles do not exist");
+    return roles;
+  }
+
   private cocktailSnapshot(cocktail: Cocktail) {
     return {
       zh: cocktail.zh,
@@ -591,6 +748,7 @@ export class AdminService {
       this.redis.del("list:v2:*"),
       this.redis.del("list:v3:*"),
       this.redis.del("rec:v1:*"),
+      this.redis.del("daily-recommendations:v1:*"),
     ]);
   }
 }
