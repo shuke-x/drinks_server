@@ -39,6 +39,7 @@ export class AdminController {
   @Post("cocktails/:id/revisions/:revisionId/approve") @RequirePermissions("cocktails.review") approveRevision(@Req() r: AuthRequest, @Param("id") id: string, @Param("revisionId") revisionId: string, @Body() dto: ReviewDto) { return this.revisions.review(r.authUser.id, id, revisionId, "approve", dto.reason); }
   @Post("cocktails/:id/revisions/:revisionId/reject") @RequirePermissions("cocktails.review") rejectRevision(@Req() r: AuthRequest, @Param("id") id: string, @Param("revisionId") revisionId: string, @Body() dto: ReviewDto) { return this.revisions.review(r.authUser.id, id, revisionId, "reject", dto.reason); }
   @Delete("cocktails/:id") @RequirePermissions("cocktails.delete") remove(@Req() r: AuthRequest, @Param("id") id: string) { return this.admin.removeCocktail(r.authUser.id, id); }
+  @Delete("cocktails") @RequirePermissions("cocktails.delete") clearCocktails(@Req() r: AuthRequest) { return this.admin.clearCocktails(r.authUser.id); }
   @Get("audit-logs") @RequirePermissions("audit_logs.read") auditLogs(@Query() q: AdminAuditQueryDto) { return this.admin.auditLogs(q); }
   @Get("roles") @RequirePermissions("roles.read") rolesList() { return this.admin.listRoles(); }
   @Post("permissions") @RequirePermissions("roles.manage") createPermission(@Req() r: AuthRequest, @Body() dto: CreatePermissionDto) { return this.admin.createPermission(r.authUser.id, dto); }

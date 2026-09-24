@@ -1,7 +1,10 @@
+import { MediaAccessService } from "../upload/media-access.service";
 import { ForbiddenException, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { nanoid } from "nanoid";
-import { In, Repository } from "typeorm";
+import { createHash } from "crypto";
+import { HttpException, HttpStatus } from "@nestjs/common";
+import { In, ILike, Repository } from "typeorm";
 import {
   BusinessException,
   ErrorCode,
@@ -21,8 +24,9 @@ import {
   RecipeItem,
 } from "./entities/cocktail.entity";
 import { normalizeSpirit, spiritToBase } from "./mappers/spirit.mapper";
+import { CocktailTranslationsDto } from "./dto/cocktail-translations.dto";
 
-type RevisionContent = {
+type RevisionContent = CocktailTranslationsDto & {
   zh: string;
   en: string;
   spirit: string;
@@ -52,6 +56,7 @@ export class CocktailsService {
     @InjectRepository(DailyRecommendation)
     private readonly dailyRecommendations: Repository<DailyRecommendation>,
     private readonly redis: RedisService,
+    private readonly media: MediaAccessService,
   ) {}
 
   private out(x: Cocktail) {
@@ -79,22 +84,24 @@ export class CocktailsService {
     };
   }
 
-  async list(q: QueryCocktailDto) {
-    const category = q.spirit
-      ? await this.resolveCategory(q.spirit, false)
-      : null;
-    const cacheKey = `list:v4:p${q.page}:l${q.limit}`;
-    const cache =
-      !q.spirit && q.page === 1
-        ? await this.redis.get<any>(cacheKey)
-        : null;
-    if (cache) return cache;
+  private readonly queries=new Map<string,Promise<unknown>>();
+  async list(q:QueryCocktailDto) {
+    const key='list:v4:'+createHash('sha256').update(JSON.stringify([q.page,q.limit,q.spirit??'',q.search?.trim()??''])).digest('hex');
+    const hit=await this.redis.get<unknown>(key);
+    if(hit) return hit;
+    const pending=this.queries.get(key);if(pending) return pending;
+    if(this.queries.size>=128) throw new HttpException('Too many queries',HttpStatus.TOO_MANY_REQUESTS);
+    const load=this.loadList(q).then(async result=>{await this.redis.withTTL(key,result,30);return result;}).finally(()=>this.queries.delete(key));
+    this.queries.set(key,load);return load;
+  }
+  private async loadList(q:QueryCocktailDto) {
+    const category=q.spirit?await this.resolveCategory(q.spirit,false):null;
     const [rows, total] = await this.repo.findAndCount({
-      where: {
-        isPrivate: false,
-        status: CocktailStatus.PUBLISHED,
+      where: (q.search?.trim() ? ["zh","en"] : [null]).map(field=>({
+        isPrivate: false, status: CocktailStatus.PUBLISHED,
         ...(category ? { category: { id: category.id } } : {}),
-      },
+        ...(field ? {[field]:ILike(`%${q.search!.trim().replace(/[\\%_]/g, '\\$&')}%`)} : {}),
+      })),
       relations: { category: true, owner: true },
       order: { createdAt: "ASC", id: "ASC" },
       skip: (q.page - 1) * q.limit,
@@ -105,8 +112,6 @@ export class CocktailsService {
       data: rows.map((x) => this.out(x)),
       meta: { page: q.page, limit: q.limit, total },
     };
-    if (!q.spirit && q.page === 1)
-      await this.redis.withTTL(cacheKey, result, 60);
     return result;
   }
 
@@ -127,6 +132,7 @@ export class CocktailsService {
   async create(dto: CreateCocktailDto, userId?: string) {
     if (!userId)
       throw new ForbiddenException("Login is required to create a cocktail");
+    if(dto.images?.length) await this.media.assertOwned(dto.images,userId!);
     const requestedCategory = dto.spirit ?? dto.base;
     if (!requestedCategory)
       throw new BusinessException(
@@ -157,6 +163,7 @@ export class CocktailsService {
   async update(id: string, dto: UpdateCocktailDto, userId?: string) {
     const x = await this.raw(id);
     this.assertCanManage(x, userId);
+    if(dto.images?.length) await this.media.assertOwned(dto.images,userId!);
     if (x.isOfficial)
       throw new BusinessException(
         ErrorCode.CONFLICT,
@@ -448,6 +455,12 @@ export class CocktailsService {
       story: x.story,
       recipe: x.recipe,
       steps: x.steps,
+      storyEn: x.storyEn,
+      glassEn: x.glassEn,
+      garnishEn: x.garnishEn,
+      flavorEn: x.flavorEn,
+      tagsEn: x.tagsEn,
+      stepsEn: x.stepsEn,
     };
   }
 

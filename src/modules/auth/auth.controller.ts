@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, Req, Res, UnauthorizedException, UseGuards } from "@nestjs/common";
 import {
   ApiBody,
   ApiCreatedResponse,
@@ -12,14 +12,17 @@ import { RefreshDto } from "./dto/refresh.dto";
 import { RateLimit } from "../../common/security/rate-limit.decorator";
 import { RedisRateLimitGuard } from "../../common/security/redis-rate-limit.guard";
 import { AccessTokenGuard } from "./access-token.guard";
-import { Request } from "express";
+import { Request, Response } from "express";
+import { ConfigService } from "@nestjs/config";
+import { randomBytes } from "crypto";
+import { ACCESS_COOKIE, CSRF_COOKIE, readCookie, REFRESH_COOKIE } from "./cookie-session";
 
 type AuthRequest = Request & { authUser: { id: string } };
 
 @ApiTags("auth")
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(private readonly auth: AuthService, private readonly config: ConfigService) {}
 
   @Get("challenge")
   @RateLimit({ scope: "auth-challenge", limit: 30, windowSeconds: 60 })
@@ -51,8 +54,10 @@ export class AuthController {
   @ApiCreatedResponse({
     description: "响应 data 包含 accessToken、refreshToken、expiresIn。",
   })
-  register(@Body() dto: EncryptedAuthDto) {
-    return this.auth.register(dto.challengeId, dto.ciphertext);
+  async register(@Body() dto: EncryptedAuthDto, @Res({ passthrough: true }) response: Response) {
+    const tokens = await this.auth.register(dto.challengeId, dto.ciphertext);
+    this.writeCookies(response, tokens);
+    return tokens;
   }
 
   @Post("login")
@@ -66,8 +71,10 @@ export class AuthController {
   @ApiOkResponse({
     description: "响应 data 包含 accessToken、refreshToken、expiresIn。",
   })
-  login(@Body() dto: EncryptedAuthDto) {
-    return this.auth.login(dto.challengeId, dto.ciphertext);
+  async login(@Body() dto: EncryptedAuthDto, @Res({ passthrough: true }) response: Response) {
+    const tokens = await this.auth.login(dto.challengeId, dto.ciphertext);
+    this.writeCookies(response, tokens);
+    return tokens;
   }
 
   @Post("refresh")
@@ -78,8 +85,12 @@ export class AuthController {
   @ApiOkResponse({
     description: "旧 refreshToken 会被撤销；响应 data 返回新的 token 对。",
   })
-  refresh(@Body() dto: RefreshDto) {
-    return this.auth.refresh(dto.refreshToken);
+  async refresh(@Body() dto: RefreshDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    const raw = readCookie(request, REFRESH_COOKIE) ?? dto.refreshToken;
+    if (!raw) throw new UnauthorizedException("Refresh token is required");
+    const tokens = await this.auth.refresh(raw);
+    this.writeCookies(response, tokens);
+    return tokens;
   }
 
   @Post("logout")
@@ -88,8 +99,26 @@ export class AuthController {
   @ApiOperation({ summary: "注销并撤销刷新令牌" })
   @ApiBody({ type: RefreshDto })
   @ApiOkResponse({ description: "响应 data 为 { success: true }。" })
-  async logout(@Body() dto: RefreshDto) {
-    await this.auth.logout(dto.refreshToken);
+  async logout(@Body() dto: RefreshDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    const raw = readCookie(request, REFRESH_COOKIE) ?? dto.refreshToken;
+    if (raw) await this.auth.logout(raw);
+    if (this.cookieEnabled()) {
+      response.clearCookie(ACCESS_COOKIE, { path: "/" });
+      response.clearCookie(REFRESH_COOKIE, { path: "/" });
+      response.clearCookie(CSRF_COOKIE, { path: "/" });
+    }
     return { success: true };
+  }
+
+  private cookieEnabled() { return this.config.get("AUTH_COOKIE_ENABLED", "false") === "true"; }
+  private writeCookies(response: Response, tokens: { accessToken: string; refreshToken: string; expiresIn: number }) {
+    if (!this.cookieEnabled()) return;
+    const secure = this.config.get("NODE_ENV", "development") === "production";
+    const configuredSameSite = this.config.get("AUTH_COOKIE_SAME_SITE", "lax");
+    const sameSite = configuredSameSite === "none" ? "none" as const : configuredSameSite === "strict" ? "strict" as const : "lax" as const;
+    const common = { secure, sameSite, path: "/" };
+    response.cookie(ACCESS_COOKIE, tokens.accessToken, { ...common, httpOnly: true, maxAge: tokens.expiresIn * 1000 });
+    response.cookie(REFRESH_COOKIE, tokens.refreshToken, { ...common, httpOnly: true, maxAge: Number(this.config.get("AUTH_REFRESH_DAYS", 30)) * 86400000 });
+    response.cookie(CSRF_COOKIE, randomBytes(32).toString("base64url"), { ...common, httpOnly: false, maxAge: Number(this.config.get("AUTH_REFRESH_DAYS", 30)) * 86400000 });
   }
 }

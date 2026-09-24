@@ -1,3 +1,4 @@
+import { DrinkRecordEntity, FlavorEntity } from '../modules/experience/experience.entities';
 import { join } from "path";
 import { DataSource } from "typeorm";
 import { RefreshToken } from "../modules/auth/entities/refresh-token.entity";
@@ -22,7 +23,7 @@ export default new DataSource({
   username: process.env.DB_USER ?? "drinks",
   password: process.env.DB_PASS ?? "drinks",
   database: process.env.DB_NAME ?? "tonight_drinks",
-  entities: [Cocktail, CocktailCategory, CocktailReviewLog, CocktailRevision, DailyRecommendation, User, RefreshToken, Favorite, Role, Permission, UserRole, RolePermission, AdminAuditLog, AdminImportJob, UploadAsset],
+  entities: [DrinkRecordEntity, FlavorEntity, Cocktail, CocktailCategory, CocktailReviewLog, CocktailRevision, DailyRecommendation, User, RefreshToken, Favorite, Role, Permission, UserRole, RolePermission, AdminAuditLog, AdminImportJob, UploadAsset],
   migrations: [join(__dirname, "../../migrations/*{.ts,.js}")],
   synchronize: false,
 });

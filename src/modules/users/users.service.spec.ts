@@ -28,6 +28,7 @@ describe("UsersService.removeMe", () => {
     uploadAssets as never,
     storage as never,
     redis as never,
+    {assertOwned:jest.fn().mockResolvedValue(undefined)} as never,
   );
 
   beforeEach(() => {

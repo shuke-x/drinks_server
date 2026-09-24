@@ -1,3 +1,4 @@
+import { MediaAccessService } from "../upload/media-access.service";
 import {
   ConflictException,
   Inject,
@@ -37,6 +38,7 @@ export class UsersService {
     private readonly uploadAssets: Repository<UploadAsset>,
     @Inject(STORAGE) private readonly storage: StorageProvider,
     private readonly redis: RedisService,
+    private readonly media: MediaAccessService,
   ) {}
   async me(id: string) {
     const user = await this.users.findOneBy({ id });
@@ -46,6 +48,7 @@ export class UsersService {
   async updateMe(id: string, dto: UpdateMeDto) {
     const user = await this.users.findOneBy({ id });
     if (!user) throw new NotFoundException("User not found");
+    if(dto.avatarUrl) await this.media.assertOwned([dto.avatarUrl],id);
     Object.assign(user, dto);
     return this.profile(await this.users.save(user));
   }

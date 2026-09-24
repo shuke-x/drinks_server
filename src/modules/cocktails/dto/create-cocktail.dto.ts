@@ -14,11 +14,12 @@ import {
 import { transformSpirit } from "../mappers/spirit.mapper";
 import { IsRecipe } from "../validators/recipe-item.validator";
 import { RecipeItem } from "../entities/cocktail.entity";
-export class CreateCocktailDto {
+import { CocktailTranslationsDto } from "./cocktail-translations.dto";
+export class CreateCocktailDto extends CocktailTranslationsDto {
   /** Private cocktails remain drafts and cannot be submitted for public review. */
   @IsOptional() @IsBoolean() isPrivate?: boolean;
   @IsString() @Length(1, 64) zh!: string;
-  @IsOptional() @IsString() @Length(1, 128) en = "House Original";
+  @IsOptional() @IsString() @Length(0, 128) en = "";
   @IsOptional() @Transform(transformSpirit) @IsString() @Length(1, 64) spirit?: string;
   @IsOptional() @Transform(transformSpirit) @IsString() @Length(1, 64) base?: string;
   @IsOptional() @IsInt() @Min(0) @Max(99) abv = 20;

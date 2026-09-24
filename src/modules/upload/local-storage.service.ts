@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { promises as fs } from "fs";
+import { constants, promises as fs } from "fs";
 import { join } from "path";
 import { nanoid } from "nanoid";
 import sharp from "sharp";
@@ -11,6 +11,13 @@ export class LocalStorageService implements StorageProvider {
   constructor(private readonly config: ConfigService) {}
 
   async save(file: Express.Multer.File, options: SaveImageOptions = {}) {
+    const output = await LocalStorageService.encode(file,options);
+    await fs.mkdir(join(process.cwd(), "uploads"), { recursive: true });
+    const name = `${nanoid(16)}.webp`;
+    await fs.writeFile(join(process.cwd(), "uploads", name), output);
+    return `${this.config.get("PUBLIC_BASE_URL", "http://localhost:3000")}/static/${name}`;
+  }
+  static async encode(file:Express.Multer.File,options:SaveImageOptions={}) {
     inspectImageFile(file);
 
     let pipeline = sharp(file.buffer, {
@@ -40,10 +47,15 @@ export class LocalStorageService implements StorageProvider {
       throw new BadRequestException("Invalid or unsupported image data");
     }
 
-    await fs.mkdir(join(process.cwd(), "uploads"), { recursive: true });
-    const name = `${nanoid(16)}.webp`;
-    await fs.writeFile(join(process.cwd(), "uploads", name), output);
-    return `${this.config.get("PUBLIC_BASE_URL", "http://localhost:3000")}/static/${name}`;
+    return output;
+  }
+  async read(key:string) {
+    if(!/^[A-Za-z0-9_-]{1,128}\.(?:jpg|jpeg|png|webp)$/.test(key)) throw new Error('Invalid image key');
+    return fs.readFile(join(process.cwd(),'uploads',key));
+  }
+  async ready() {
+    await fs.mkdir(join(process.cwd(),'uploads'),{recursive:true});
+    await fs.access(join(process.cwd(),'uploads'),constants.R_OK | constants.W_OK);
   }
   async remove(url: string) {
     const base = new URL(

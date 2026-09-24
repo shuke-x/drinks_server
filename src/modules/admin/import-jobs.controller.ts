@@ -88,8 +88,8 @@ export class ImportJobsController {
   }
 
   @Get("template")
-  template() {
-    return new StreamableFile(createImportTemplate(), {
+  async template() {
+    return new StreamableFile(await createImportTemplate(), {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       disposition: 'attachment; filename="cocktail-import-template.xlsx"',
     });

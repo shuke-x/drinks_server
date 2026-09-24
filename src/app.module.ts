@@ -1,8 +1,8 @@
+import { OperationsModule } from './modules/operations/operations.module';
+import { ExperienceModule } from './modules/experience/experience.module';
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
-import { ServeStaticModule } from "@nestjs/serve-static";
-import { join } from "path";
 import { typeormConfig } from "./config/typeorm.config";
 import { RedisModule } from "./modules/redis/redis.module";
 import { CocktailsModule } from "./modules/cocktails/cocktails.module";
@@ -18,20 +18,18 @@ import { RequestLoggerMiddleware } from "./common/middleware/request-logger.midd
       inject: [ConfigService],
       useFactory: typeormConfig,
     }),
-    ServeStaticModule.forRoot(
-      { rootPath: join(process.cwd(), "uploads"), serveRoot: "/static" },
-      { rootPath: join(process.cwd(), "public"), serveRoot: "/assets" },
-    ),
     RedisModule,
     CocktailsModule,
     UploadModule,
     AuthModule,
     UsersModule,
     AdminModule,
+    ExperienceModule,
+    OperationsModule,
   ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestLoggerMiddleware).forRoutes("*");
+    consumer.apply(RequestLoggerMiddleware).forRoutes("{*path}");
   }
 }

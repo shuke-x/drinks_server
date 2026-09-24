@@ -3,6 +3,7 @@ import Redis from "ioredis";
 @Injectable()
 export class RedisService {
   constructor(@Inject("REDIS_CLIENT") private readonly client: Redis) {}
+  async ping(): Promise<string> { return this.client.ping(); }
   async get<T>(key: string): Promise<T | null> {
     const x = await this.client.get(key);
     return x ? (JSON.parse(x) as T) : null;

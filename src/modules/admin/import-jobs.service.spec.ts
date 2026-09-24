@@ -1,7 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import { plainToInstance } from "class-transformer";
 import { validateSync } from "class-validator";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { CreateCocktailDto } from "../cocktails/dto/create-cocktail.dto";
 import {
   detectImportFormat,
@@ -11,37 +11,31 @@ import {
 } from "./import-jobs.service";
 
 describe("import job file parsing", () => {
-  it("parses a JSON array", () => {
-    const rows = parseImportRows(
+  it("parses a JSON array", async () => {
+    const rows = await parseImportRows(
       Buffer.from(JSON.stringify([{ zh: "测试酒单", spirit: "gin" }])),
       "json",
     );
     expect(rows).toEqual([{ zh: "测试酒单", spirit: "gin" }]);
   });
 
-  it("parses a wrapped JSON payload", () => {
-    const rows = parseImportRows(
+  it("parses a wrapped JSON payload", async () => {
+    const rows = await parseImportRows(
       Buffer.from(JSON.stringify({ cocktails: [{ zh: "测试酒单" }] })),
       "json",
     );
     expect(rows).toHaveLength(1);
   });
 
-  it("parses the first XLSX worksheet", () => {
-    const workbook = XLSX.utils.book_new();
-    const sheet = XLSX.utils.json_to_sheet([
-      { zh: "测试酒单", spirit: "gin", recipe: '[{"n":"金酒","ml":30}]' },
-    ]);
-    XLSX.utils.book_append_sheet(workbook, sheet, "cocktails");
-    const payload = XLSX.write(workbook, {
-      type: "buffer",
-      bookType: "xlsx",
-    });
-    const rows = parseImportRows(payload, "xlsx");
+  it("parses the first XLSX worksheet", async () => {
+    const workbook=new ExcelJS.Workbook();const sheet=workbook.addWorksheet('cocktails');
+    sheet.addRow(['zh','spirit','recipe']);sheet.addRow(['测试酒单','gin','[{"n":"金酒","ml":30}]']);
+    const payload=Buffer.from(await workbook.xlsx.writeBuffer());
+    const rows = await parseImportRows(payload, "xlsx");
     expect(rows[0].zh).toBe("测试酒单");
   });
 
-  it("rejects unsupported file extensions", () => {
+  it("rejects unsupported file extensions", async () => {
     expect(() =>
       detectImportFormat({
         originalname: "cocktails.csv",
@@ -50,7 +44,7 @@ describe("import job file parsing", () => {
     ).toThrow(BadRequestException);
   });
 
-  it("maps the public import columns to the cocktail model", () => {
+  it("maps the public import columns to the cocktail model", async () => {
     expect(
       normalizeImportRow({
         name: "内格罗尼",
@@ -70,7 +64,7 @@ describe("import job file parsing", () => {
     });
   });
 
-  it("parses human-readable multiline ingredients and numbered steps", () => {
+  it("parses human-readable multiline ingredients and numbered steps", async () => {
     const normalized = normalizeImportRow({
       name: "最后一语",
       baseSpirit: "Gin",
@@ -100,9 +94,31 @@ describe("import job file parsing", () => {
     ).toEqual([]);
   });
 
-  it("generates a readable XLSX template", () => {
-    const rows = parseImportRows(createImportTemplate(), "xlsx");
+  it("generates a readable XLSX template", async () => {
+    const rows = await parseImportRows(await createImportTemplate(), "xlsx");
     expect(rows[0]).toHaveProperty("baseSpirit", "gin");
     expect(rows[0]).toHaveProperty("ingredients");
+    const normalized = normalizeImportRow(rows[0]);
+    expect(normalized).toMatchObject({ storyEn: "A classic bittersweet cocktail.", tagsEn: ["Bittersweet", "Classic"], recipe: [{ n: "金酒", nEn: "Gin", ml: 30 }, { n: "金巴利", nEn: "Campari", ml: 30 }, { n: "甜味美思", nEn: "Sweet vermouth", ml: 30 }] });
+    expect(validateSync(plainToInstance(CreateCocktailDto, normalized), { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
   });
+
+  it("accepts legacy sheets and empty English cells with strict validation", () => {
+    const normalized = normalizeImportRow({ name: "测试", nameEn: "", baseSpirit: "gin", ingredients: '[{"name":"金酒","amount":30,"unit":"ml"}]', descriptionEn: "", tagsEn: "", stepsEn: "" });
+    expect(validateSync(plainToInstance(CreateCocktailDto, normalized), { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+  });
+
+  it("preserves translated text amounts and rejects invalid ingredient translations", () => {
+    const normalized = normalizeImportRow({ name: "测试", baseSpirit: "gin", ingredients: '[{"name":"橙皮","nameEn":"Orange peel","amount":1,"unit":"片","amountTextEn":"1 piece"}]', stepsEn: "1. Add ice.\n2. Stir." });
+    expect(normalized.recipe).toEqual([{ n: "橙皮", nEn: "Orange peel", t: "1 片", tEn: "1 piece" }]);
+    expect(normalized.stepsEn).toEqual(["Add ice.", "Stir."]);
+    expect(validateSync(plainToInstance(CreateCocktailDto, { ...normalized, recipe: [{ n: "金酒", ml: 30, nEn: 123 }] }))).not.toEqual([]);
+  });
+});
+
+it('rejects formula cells and oversized input before import',async()=>{
+ const workbook=new ExcelJS.Workbook();const sheet=workbook.addWorksheet('cocktails');
+ sheet.addRow(['zh']);sheet.addRow([{formula:'1+1',result:2}]);
+ await expect(parseImportRows(Buffer.from(await workbook.xlsx.writeBuffer()),'xlsx')).rejects.toThrow();
+ await expect(parseImportRows(Buffer.alloc(10*1024*1024+1),'json')).rejects.toThrow('10 MB');
 });

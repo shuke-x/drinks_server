@@ -17,6 +17,7 @@ export class CreateCocktailCategoryDto {
   @IsString() @Length(1, 64) name!: string;
   @IsOptional() @IsString() @Length(1, 128) nameEn?: string;
   @IsOptional() @IsString() @Length(1, 2000) description?: string;
+  @IsOptional() @IsString() @Length(0, 2000) descriptionEn?: string | null;
   @IsOptional()
   @IsUrl({ require_tld: false })
   @Length(1, 2048)
@@ -29,6 +30,7 @@ export class UpdateCocktailCategoryDto {
   @IsOptional() @IsString() @Length(1, 64) name?: string;
   @IsOptional() @IsString() @Length(1, 128) nameEn?: string;
   @IsOptional() @IsString() @Length(1, 2000) description?: string;
+  @IsOptional() @IsString() @Length(0, 2000) descriptionEn?: string | null;
   @IsOptional()
   @IsUrl({ require_tld: false })
   @Length(1, 2048)

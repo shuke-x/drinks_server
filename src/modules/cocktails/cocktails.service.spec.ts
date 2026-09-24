@@ -18,6 +18,7 @@ describe("CocktailsService published revisions", () => {
     garnish: "装饰",
     flavor: "风味",
     story: "故事",
+    storyEn: "Existing English story",
     recipe: [{ n: "金酒", ml: 30 }],
     steps: [],
     isOfficial: false,
@@ -41,14 +42,17 @@ describe("CocktailsService published revisions", () => {
       {} as any,
       {} as any,
       {} as any,
+      {assertOwned:jest.fn().mockResolvedValue(undefined)} as any,
     );
     const result: any = await service.update(
       cocktail.id,
-      { zh: "待审核名称" },
+      { zh: "待审核名称", stepsEn: ["Stir"] },
       owner.id,
     );
     expect(result.cocktail.zh).toBe("线上名称");
     expect(result.revision.content.zh).toBe("待审核名称");
+    expect(result.revision.content.storyEn).toBe("Existing English story");
+    expect(result.revision.content.stepsEn).toEqual(["Stir"]);
     expect(result.revision.status).toBe(CocktailStatus.DRAFT);
   });
 
@@ -73,6 +77,7 @@ describe("CocktailsService published revisions", () => {
       } as any,
       {} as any,
       {} as any,
+      {assertOwned:jest.fn().mockResolvedValue(undefined)} as any,
     );
     const result: any = await service.submit(cocktail.id, owner.id);
     expect(result.cocktail.status).toBe(CocktailStatus.PUBLISHED);
@@ -114,6 +119,7 @@ describe("CocktailsService publisher", () => {
       {} as any,
       {} as any,
       redis as any,
+      {assertOwned:jest.fn().mockResolvedValue(undefined)} as any,
     );
 
     const result: any = await service.list({ page: 1, limit: 10 });

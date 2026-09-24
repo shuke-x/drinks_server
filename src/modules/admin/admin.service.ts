@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -37,6 +38,7 @@ import { Permission } from "./entities/permission.entity";
 import { Role } from "./entities/role.entity";
 import { RolePermission } from "./entities/role-permission.entity";
 import { UserRole } from "./entities/user-role.entity";
+import { COCKTAIL_TRANSLATION_FIELDS } from "../cocktails/mappers/cocktail-language.mapper";
 
 @Injectable()
 export class AdminService {
@@ -306,7 +308,7 @@ export class AdminService {
       cocktail.spirit = category.code;
       cocktail.category = category;
     }
-    for (const field of ["zh", "en", "abv", "story", "tags", "images"] as const) {
+    for (const field of ["zh", "en", "abv", "story", "tags", "images", "glass", "garnish", "flavor", "recipe", "steps", ...COCKTAIL_TRANSLATION_FIELDS] as const) {
       if (dto[field] !== undefined) (cocktail as any)[field] = dto[field];
     }
     await this.dataSource.transaction(async (manager) => {
@@ -342,6 +344,19 @@ export class AdminService {
     });
     await this.invalidateCocktailCache();
     return { id };
+  }
+
+  async clearCocktails(actorId: string) {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const superAdmin = await manager.query(`SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur."roleId" WHERE ur."userId" = $1 AND r.code = 'super_admin' LIMIT 1`, [actorId]);
+      if (!superAdmin.length) throw new ForbiddenException("Only super administrators can clear all cocktails");
+      const count = await manager.count(Cocktail, { withDeleted: true });
+      await manager.query(`DELETE FROM cocktails`);
+      await this.audit(manager, actorId, "cocktails.clear", "cocktail_collection", "all", { count }, { count: 0 });
+      return count;
+    });
+    await this.invalidateCocktailCache();
+    return { deleted: result };
   }
 
   async auditLogs(query: AdminAuditQueryDto) {
@@ -708,6 +723,12 @@ export class AdminService {
 
   private cocktailSnapshot(cocktail: Cocktail) {
     return {
+      ...Object.fromEntries(COCKTAIL_TRANSLATION_FIELDS.map(field => [field, cocktail[field]])),
+      glass: cocktail.glass,
+      garnish: cocktail.garnish,
+      flavor: cocktail.flavor,
+      recipe: cocktail.recipe,
+      steps: cocktail.steps,
       zh: cocktail.zh,
       en: cocktail.en,
       spirit: cocktail.spirit,
@@ -745,6 +766,8 @@ export class AdminService {
   private async invalidateCocktailCache() {
     await Promise.all([
       this.redis.del("list:v1:*"),
+      this.redis.del("list:v4:*"),
+      this.redis.del("daily-recommendations:v1:*"),
       this.redis.del("list:v2:*"),
       this.redis.del("list:v3:*"),
       this.redis.del("rec:v1:*"),

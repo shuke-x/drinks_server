@@ -8,8 +8,10 @@ import { CocktailRevision } from "../cocktails/entities/cocktail-revision.entity
 import { Cocktail, CocktailStatus } from "../cocktails/entities/cocktail.entity";
 import { User } from "../users/entities/user.entity";
 import { AdminAuditLog } from "./entities/audit-log.entity";
+import { COCKTAIL_TRANSLATION_FIELDS } from "../cocktails/mappers/cocktail-language.mapper";
 
 const CONTENT_FIELDS = [
+  ...COCKTAIL_TRANSLATION_FIELDS,
   "zh",
   "en",
   "abv",
@@ -142,6 +144,8 @@ export class AdminRevisionsService {
   private async invalidate() {
     await Promise.all([
       this.redis.del("list:v1:*"),
+      this.redis.del("list:v4:*"),
+      this.redis.del("daily-recommendations:v1:*"),
       this.redis.del("list:v2:*"),
       this.redis.del("list:v3:*"),
       this.redis.del("rec:v1:*"),

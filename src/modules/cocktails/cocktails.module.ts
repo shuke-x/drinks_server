@@ -1,3 +1,4 @@
+import { UploadModule } from "../upload/upload.module";
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { AuthModule } from "../auth/auth.module";
@@ -12,7 +13,7 @@ import { CocktailsController } from "./cocktails.controller";
 import { CocktailsService } from "./cocktails.service";
 import { DailyRecommendation } from "./entities/daily-recommendation.entity";
 @Module({
-  imports: [TypeOrmModule.forFeature([Cocktail, CocktailCategory, CocktailReviewLog, CocktailRevision, DailyRecommendation, User]), AuthModule],
+  imports: [UploadModule,TypeOrmModule.forFeature([Cocktail, CocktailCategory, CocktailReviewLog, CocktailRevision, DailyRecommendation, User]), AuthModule],
   controllers: [CocktailsController, CocktailCategoriesController],
   providers: [CocktailsService, CocktailCategoriesService],
   exports: [CocktailsService, CocktailCategoriesService],

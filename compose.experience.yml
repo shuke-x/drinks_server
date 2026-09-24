@@ -1,0 +1,28 @@
+name: tonight-experience-local
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: drinks
+      POSTGRES_PASSWORD: local-experience-only
+      POSTGRES_DB: tonight_experience_local
+    ports:
+      - '127.0.0.1:55438:5432'
+    volumes:
+      - experience_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U drinks -d tonight_experience_local']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '127.0.0.1:56388:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+volumes:
+  experience_postgres:

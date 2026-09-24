@@ -4,6 +4,8 @@ describe("UploadController", () => {
   const storage = {
     save: jest.fn(),
     remove: jest.fn(),
+    read:jest.fn(),
+    ready:jest.fn(),
   };
   const assets = {
     create: jest.fn((value) => value),

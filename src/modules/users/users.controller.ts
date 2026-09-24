@@ -8,6 +8,7 @@ import {
   Query,
   Req,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
 import {
   ApiBearerAuth,
@@ -22,12 +23,14 @@ import { FavoriteDto } from "./dto/favorite.dto";
 import { UpdateMeDto } from "./dto/update-me.dto";
 import { QueryMyCocktailsDto } from "./dto/query-my-cocktails.dto";
 import { UsersService } from "./users.service";
+import { CocktailLanguageInterceptor } from "../cocktails/cocktail-language.interceptor";
 
 type AuthRequest = Request & { authUser: { id: string; email: string } };
 
 @ApiTags("users")
 @ApiBearerAuth("access-token")
 @Controller("users/me")
+@UseInterceptors(CocktailLanguageInterceptor)
 @UseGuards(AccessTokenGuard)
 export class UsersController {
   constructor(private readonly users: UsersService) {}

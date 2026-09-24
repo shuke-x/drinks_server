@@ -3,3 +3,7 @@ dist
 .git
 .env
 uploads/*
+
+backups
+*.tdbackup
+media-migration-*.json

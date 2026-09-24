@@ -39,6 +39,7 @@ export class AdminCategoriesService {
           ...dto,
           nameEn: dto.nameEn ?? null,
           description: dto.description ?? null,
+          descriptionEn: dto.descriptionEn ?? null,
           iconUrl: dto.iconUrl ?? null,
           sortOrder: dto.sortOrder ?? 0,
           isActive: dto.isActive ?? true,

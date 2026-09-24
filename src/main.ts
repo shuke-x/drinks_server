@@ -1,4 +1,8 @@
-import { ValidationPipe } from "@nestjs/common";
+import { NestExpressApplication } from '@nestjs/platform-express';
+import express from "express";
+import { join } from "path";
+import { MediaAccessService } from "./modules/upload/media-access.service";
+import { RequestMethod, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { ConfigService } from "@nestjs/config";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
@@ -6,8 +10,13 @@ import { AppModule } from "./app.module";
 import { ResponseInterceptor } from "./common/interceptors/response.interceptor";
 import { AllExceptionFilter } from "./common/filters/http-exception.filter";
 import helmet from "helmet";
+import { cookieSessionSecurity } from "./common/middleware/cookie-session-security.middleware";
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  app.useBodyParser('json', { limit: '3mb', type: (req: { url?: string }) =>
+    /^\/api\/v1\/(?:users\/me|admin)\/drink-records(?:[/?]|$)/.test(req.url ?? '') });
+  app.useBodyParser('json', { limit: '100kb' });
+  app.useBodyParser('urlencoded', { extended: true, limit: '100kb' });
   const env = app.get(ConfigService);
   const nodeEnv = env.get<string>("NODE_ENV", "development");
   const swaggerEnabled =
@@ -20,8 +29,8 @@ async function bootstrap() {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
-  const express = app.getHttpAdapter().getInstance();
-  express.set("trust proxy", env.get<string>("TRUST_PROXY", "loopback"));
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.set("trust proxy", env.get<string>("TRUST_PROXY", "loopback"));
   app.use(
     swaggerEnabled
       ? helmet({
@@ -32,7 +41,10 @@ async function bootstrap() {
           crossOriginResourcePolicy: { policy: "cross-origin" },
         }),
   );
-  app.setGlobalPrefix("api/v1");
+  app.setGlobalPrefix("api/v1",{exclude:[{path:'static/{*path}',method:RequestMethod.ALL}]});
+  app.use('/assets',express.static(join(process.cwd(),'public'),{dotfiles:'deny'}));
+  const media=app.get(MediaAccessService);
+  app.use((req:express.Request,_res:express.Response,next:express.NextFunction)=>{if(req.body) req.body=media.map(req.body,undefined,true);next();});
   app.enableCors({
     origin: corsOrigins.length > 0 ? corsOrigins : false,
     methods: [
@@ -44,9 +56,13 @@ async function bootstrap() {
       "DELETE",
       "OPTIONS",
     ],
-    allowedHeaders: ["Authorization", "Content-Type"],
+    allowedHeaders: ["Authorization", "Content-Type", "X-Record-Account"],
     maxAge: 86400,
   });
+  app.use(cookieSessionSecurity(
+    env.get<string>("AUTH_COOKIE_ENABLED", "false") === "true",
+    corsOrigins,
+  ));
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -54,7 +70,7 @@ async function bootstrap() {
       transform: true,
     }),
   );
-  app.useGlobalInterceptors(new ResponseInterceptor());
+  app.useGlobalInterceptors(new ResponseInterceptor(media));
   app.useGlobalFilters(new AllExceptionFilter());
   if (swaggerEnabled) {
     const config = new DocumentBuilder()
@@ -75,6 +91,7 @@ async function bootstrap() {
       .build();
     SwaggerModule.setup("docs", app, SwaggerModule.createDocument(app, config));
   }
+  app.enableShutdownHooks();
   await app.listen(env.get<number>("PORT", 3000));
 }
 void bootstrap();

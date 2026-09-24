@@ -11,7 +11,7 @@ import {
 } from "typeorm";
 import { User } from "../../users/entities/user.entity";
 import { CocktailCategory } from "./cocktail-category.entity";
-export type RecipeItem = { n: string; ml?: number; t?: string };
+export type RecipeItem = { n: string; ml?: number; t?: string; nEn?: string; tEn?: string };
 export enum CocktailStatus {
   DRAFT = "draft",
   PENDING = "pending",
@@ -23,7 +23,7 @@ export enum CocktailStatus {
 export class Cocktail {
   @PrimaryColumn({ type: "varchar", length: 32 }) id!: string;
   @Column({ length: 64 }) zh!: string;
-  @Column({ length: 128, default: "House Original" }) en!: string;
+  @Column({ length: 128, default: "" }) en!: string;
   /** Public API compatibility field; values are managed by cocktail_categories. */
   @Index() @Column({ type: "varchar", length: 64 }) spirit!: string;
   @ManyToOne(() => CocktailCategory, { nullable: false, onDelete: "RESTRICT" })
@@ -40,6 +40,12 @@ export class Cocktail {
   @Column({ type: "jsonb", default: () => "'[]'::jsonb" })
   recipe!: RecipeItem[];
   @Column({ type: "jsonb", default: () => "'[]'::jsonb" }) steps!: string[];
+  @Column({ type: "text", nullable: true }) storyEn!: string | null;
+  @Column({ type: "varchar", length: 64, nullable: true }) glassEn!: string | null;
+  @Column({ type: "varchar", length: 128, nullable: true }) garnishEn!: string | null;
+  @Column({ type: "varchar", length: 255, nullable: true }) flavorEn!: string | null;
+  @Column({ type: "jsonb", nullable: true }) tagsEn!: string[] | null;
+  @Column({ type: "jsonb", nullable: true }) stepsEn!: string[] | null;
   @Column({ default: true }) isOfficial!: boolean;
   /** Private cocktails are only visible to this owner and never enter public feeds. */
   @Column({ default: false }) isPrivate!: boolean;

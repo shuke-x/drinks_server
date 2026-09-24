@@ -15,7 +15,7 @@ describe("AdminRevisionsService", () => {
       id: "revision-1",
       status: CocktailStatus.PENDING,
       cocktail,
-      content: { zh: "审核后的名称", spirit: "gin" },
+      content: { zh: "审核后的名称", spirit: "gin", storyEn: "Approved story", tagsEn: ["Classic"], stepsEn: ["Stir"], recipe: [{ n: "金酒", nEn: "Gin", ml: 30 }] },
     };
     const manager = {
       save: jest.fn(async (_entity: unknown, value?: unknown) => value ?? _entity),
@@ -37,6 +37,7 @@ describe("AdminRevisionsService", () => {
     );
 
     expect(result.cocktail.zh).toBe("审核后的名称");
+    expect(result.cocktail).toMatchObject({ storyEn: "Approved story", tagsEn: ["Classic"], stepsEn: ["Stir"], recipe: [{ n: "金酒", nEn: "Gin", ml: 30 }] });
     expect(result.cocktail.status).toBe(CocktailStatus.PUBLISHED);
     expect(result.revision.status).toBe(CocktailStatus.PUBLISHED);
     expect(manager.save).toHaveBeenCalled();

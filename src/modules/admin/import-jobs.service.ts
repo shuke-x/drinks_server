@@ -10,7 +10,8 @@ import { validate } from "class-validator";
 import { nanoid } from "nanoid";
 import { extname } from "path";
 import { Repository } from "typeorm";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
+import { readSpreadsheet } from "./xlsx-parser";
 import { RedisService } from "../redis/redis.service";
 import { CreateCocktailDto } from "../cocktails/dto/create-cocktail.dto";
 import {
@@ -35,7 +36,7 @@ type ImportSummary = {
   errors: ImportRowError[];
 };
 
-const JSON_ARRAY_FIELDS = ["tags", "images", "recipe", "steps"] as const;
+const JSON_ARRAY_FIELDS = ["tags", "tagsEn", "images", "recipe", "steps", "stepsEn"] as const;
 
 @Injectable()
 export class ImportJobsService implements OnModuleInit {
@@ -71,7 +72,7 @@ export class ImportJobsService implements OnModuleInit {
     if (!file) throw new BadRequestException("file is required");
     const format = detectImportFormat(file);
     // Parse once before persisting so malformed files fail synchronously.
-    parseImportRows(file.buffer, format);
+    await parseImportRows(file.buffer, format);
     const creator = await this.users.findOneBy({ id: actorId });
     if (!creator) throw new NotFoundException("User not found");
     const job = await this.jobs.save(
@@ -147,7 +148,7 @@ export class ImportJobsService implements OnModuleInit {
       .getOne();
     if (!job) return;
     try {
-      const rows = parseImportRows(job.payload, job.format);
+      const rows = await parseImportRows(job.payload, job.format);
       const summary: ImportSummary = {
         total: rows.length,
         succeeded: 0,
@@ -248,6 +249,8 @@ export class ImportJobsService implements OnModuleInit {
   private async invalidateCocktailCache() {
     await Promise.all([
       this.redis.del("list:v1:*"),
+      this.redis.del("list:v4:*"),
+      this.redis.del("daily-recommendations:v1:*"),
       this.redis.del("list:v2:*"),
       this.redis.del("rec:v1:*"),
     ]);
@@ -267,22 +270,17 @@ export function detectImportFormat(file: Express.Multer.File): ImportFormat {
   throw new BadRequestException("Only .json and .xlsx files are supported");
 }
 
-export function parseImportRows(
+export async function parseImportRows(
   payload: Buffer,
   format: ImportFormat,
-): Record<string, unknown>[] {
+): Promise<Record<string, unknown>[]> {
+  if(payload.length>10*1024*1024) throw new BadRequestException("Import exceeds 10 MB");
   let value: unknown;
   try {
     if (format === "json") {
       value = JSON.parse(payload.toString("utf8"));
     } else {
-      const workbook = XLSX.read(payload, { type: "buffer" });
-      const sheetName = workbook.SheetNames[0];
-      if (!sheetName) throw new Error("Workbook has no worksheet");
-      value = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
-        defval: null,
-        raw: false,
-      });
+      value = await readSpreadsheet(payload);
     }
   } catch (error) {
     throw new BadRequestException(`File cannot be parsed: ${errorMessage(error)}`);
@@ -300,33 +298,47 @@ export function parseImportRows(
   return value as Record<string, unknown>[];
 }
 
-export function createImportTemplate(): Buffer {
-  const workbook = XLSX.utils.book_new();
-  const sheet = XLSX.utils.json_to_sheet([
+export async function createImportTemplate(): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const rows = [
     {
       name: "内格罗尼",
       nameEn: "Negroni",
       baseSpirit: "gin",
       abv: 24,
       description: "苦甜交织的经典鸡尾酒。",
+      descriptionEn: "A classic bittersweet cocktail.",
       tags: '["苦甜","经典"]',
+      tagsEn: '["Bittersweet","Classic"]',
+      glass: "古典杯",
+      glassEn: "Old fashioned glass",
+      garnish: "橙皮",
+      garnishEn: "Orange peel",
+      flavor: "苦甜平衡，带柑橘香气。",
+      flavorEn: "Bittersweet with citrus notes.",
       ingredients:
-        '[{"name":"金酒","amount":30,"unit":"ml"},{"name":"金巴利","amount":30,"unit":"ml"}]',
+        '[{"name":"金酒","nameEn":"Gin","amount":30,"unit":"ml"},{"name":"金巴利","nameEn":"Campari","amount":30,"unit":"ml"},{"name":"甜味美思","nameEn":"Sweet vermouth","amount":30,"unit":"ml"}]',
       steps: '["加入冰块","搅拌后滤入杯中"]',
+      stepsEn: '["Add ice.","Stir and strain into the glass."]',
       imageUrl: "https://example.com/negroni.webp",
       isPrivate: false,
     },
-  ]);
-  XLSX.utils.book_append_sheet(workbook, sheet, "cocktails");
-  return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  ];
+  const sheet=workbook.addWorksheet("cocktails");
+  sheet.columns=Object.keys(rows[0]).map(key=>({header:key,key}));
+  sheet.addRows(rows);
+  return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
 export function normalizeImportRow(raw: Record<string, unknown>) {
   const row = { ...raw };
   row.zh = row.zh ?? row.name;
   row.en = row.en ?? row.nameEn;
+  if (typeof row.en === "string" && !row.en.trim()) row.en = undefined;
   row.spirit = row.spirit ?? row.baseSpirit ?? row.base;
   row.story = row.story ?? row.description;
+  if (row.storyEn !== undefined || row.descriptionEn !== undefined)
+    row.storyEn = row.storyEn ?? row.descriptionEn;
   row.recipe = row.recipe ?? row.ingredients;
   if (row.images === undefined && row.imageUrl)
     row.images = [String(row.imageUrl).trim()];
@@ -341,8 +353,8 @@ export function normalizeImportRow(raw: Record<string, unknown>) {
           row[field] = JSON.parse(trimmed);
         } catch {
           if (field === "recipe") row[field] = parseRecipeText(trimmed);
-          else if (field === "steps") row[field] = parseStepsText(trimmed);
-          else if (field === "tags" || field === "images")
+          else if (field === "steps" || field === "stepsEn") row[field] = parseStepsText(trimmed);
+          else if (field === "tags" || field === "tagsEn" || field === "images")
             row[field] = trimmed
               .split(/[,，\r\n]+/)
               .map((x) => x.trim())
@@ -362,6 +374,7 @@ export function normalizeImportRow(raw: Record<string, unknown>) {
   delete row.nameEn;
   delete row.baseSpirit;
   delete row.description;
+  delete row.descriptionEn;
   delete row.ingredients;
   delete row.imageUrl;
   return row;
@@ -377,9 +390,13 @@ function normalizeIngredient(value: unknown) {
       ? value.amount
       : Number(String(value.amount ?? ""));
   const unit = String(value.unit ?? "ml").trim().toLowerCase();
-  if (Number.isFinite(amount) && unit === "ml") return { n: name, ml: amount };
+  const translations = {
+    ...(value.nameEn !== undefined ? { nEn: value.nameEn } : {}),
+    ...(value.amountTextEn !== undefined ? { tEn: value.amountTextEn } : {}),
+  };
+  if (Number.isFinite(amount) && unit === "ml") return { n: name, ml: amount, ...translations };
   const text = [value.amount, value.unit].filter((x) => x != null).join(" ");
-  return { n: name, ...(text ? { t: text } : {}) };
+  return { n: name, ...(text ? { t: text } : {}), ...translations };
 }
 
 function parseRecipeText(value: string) {

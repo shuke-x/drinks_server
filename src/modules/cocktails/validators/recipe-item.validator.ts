@@ -19,6 +19,9 @@ export function IsRecipe(validationOptions?: ValidationOptions) {
                 x &&
                 typeof x.n === "string" &&
                 x.n.trim() &&
+                (x.nEn === undefined || typeof x.nEn === "string") &&
+                (x.tEn === undefined || typeof x.tEn === "string") &&
+                (x.tEn === undefined || typeof x.t === "string") &&
                 ((Number.isFinite(x.ml) && x.ml > 0) ||
                   (typeof x.t === "string" && x.t.trim())) &&
                 !(x.ml !== undefined && x.t !== undefined),

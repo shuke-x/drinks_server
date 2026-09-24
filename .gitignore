@@ -4,3 +4,7 @@ dist/
 uploads/*
 !uploads/.gitkeep
 coverage/
+
+backups/
+*.tdbackup
+media-migration-*.json

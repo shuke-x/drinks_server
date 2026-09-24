@@ -221,11 +221,13 @@ cocktails/
 | `description` | 否 | 酒单介绍，对应 `story` |
 | `tags` | 否 | JSON 数组；Excel 中也可使用逗号分隔文本 |
 | `ingredients` | 是 | JSON 数组，每项为 `{name, amount, unit}` |
-| `steps` | 否 | JSON 数组；Excel 中也可使用逗号分隔文本 |
+| `steps` | 否 | JSON 数组；Excel 中也可使用换行分隔文本 |
 | `imageUrl` | 否 | 封面图片完整 URL |
 | `isPrivate` | 否 | `true/false`，也接受 `是/否`；默认 false |
 
 `isPrivate=false` 的合法记录直接成为已发布官方酒单；`isPrivate=true` 的记录归属于导入管理员并保存为私密草稿，不会公开。单行失败不会回滚其他成功行，任务详情会返回行号、可选 ID 和错误原因。服务重启后会恢复未完成任务。
+
+双语扩展：保留上述列，可选增加 `descriptionEn`、`tagsEn`、`glassEn`、`garnishEn`、`flavorEn`、`stepsEn`，配方每项支持 `nameEn` / `amountTextEn`。详细格式和 `lang` 返回规则见 [酒单双语导入与接口约定](COCKTAIL_BILINGUAL_IMPORT.md)。
 
 接口：
 
