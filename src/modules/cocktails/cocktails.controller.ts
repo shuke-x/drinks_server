@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  NotFoundException,
   Get,
   Param,
   Patch,
@@ -22,6 +23,7 @@ import { QueryCocktailDto } from "./dto/query-cocktail.dto";
 import { UpdateCocktailDto } from "./dto/update-cocktail.dto";
 import { NormalizeSpiritPipe } from "../../common/pipes/normalize-spirit.pipe";
 import { CocktailLanguageInterceptor } from "./cocktail-language.interceptor";
+import { CocktailReportsService } from "./cocktail-reports.service";
 type OptionalAuthRequest = Request & {
   authUser?: { id: string; email: string };
 };
@@ -31,22 +33,30 @@ type OptionalAuthRequest = Request & {
 @UseGuards(OptionalAccessTokenGuard,RedisRateLimitGuard)
 @RateLimit({scope:"cocktails",limit:120,windowSeconds:60})
 export class CocktailsController {
-  constructor(private readonly service: CocktailsService) {}
-  @Get() list(@Query() q: QueryCocktailDto) {
-    return this.service.list(q);
+  constructor(private readonly service: CocktailsService, private readonly reports: CocktailReportsService) {}
+  @Get() async list(@Query() q: QueryCocktailDto, @Req() req: OptionalAuthRequest) {
+    const result = await this.service.list(q);
+    return this.reports.filterBlocked(req.authUser?.id, result);
   }
-  @Get("recommendations") recommendations() {
-    return this.service.recommendations();
+  @Get("recommendations") async recommendations(@Req() req: OptionalAuthRequest) {
+    return this.reports.filterBlocked(req.authUser?.id, await this.service.recommendations());
   }
-  @Get("today-recommendations") todayRecommendations() {
-    return this.service.todayRecommendations();
+  @Get("today-recommendations") async todayRecommendations(@Req() req: OptionalAuthRequest) {
+    return this.reports.filterBlocked(req.authUser?.id, await this.service.todayRecommendations());
   }
   @RateLimit({scope:"cocktails-random",limit:30,windowSeconds:60})
-  @Get("random") random(@Query("spirit", NormalizeSpiritPipe) spirit?: string) {
-    return this.service.random(spirit);
+  @Get("random") async random(@Query("spirit", NormalizeSpiritPipe) spirit?: string, @Req() req?: OptionalAuthRequest) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const result = await this.service.random(spirit);
+      if (!(await this.reports.isBlocked(req?.authUser?.id, result.publisher?.id))) return result;
+    }
+    throw new NotFoundException("No available cocktail found");
   }
-  @Get(":id") one(@Param("id") id: string, @Req() req: OptionalAuthRequest) {
-    return this.service.one(id, req.authUser?.id);
+  @Get(":id") async one(@Param("id") id: string, @Req() req: OptionalAuthRequest) {
+    const result = await this.service.one(id, req.authUser?.id);
+    if (await this.reports.isBlocked(req.authUser?.id, result.publisher?.id))
+      throw new NotFoundException("Cocktail not found");
+    return result;
   }
   @Post() create(
     @Body() dto: CreateCocktailDto,

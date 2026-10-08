@@ -1,6 +1,7 @@
 import { MediaAccessService } from "../upload/media-access.service";
 import {
   ConflictException,
+  BadRequestException,
   Inject,
   Injectable,
   Logger,
@@ -20,6 +21,7 @@ import { UserRole } from "../admin/entities/user-role.entity";
 import { STORAGE, StorageProvider } from "../upload/storage.provider";
 import { RedisService } from "../redis/redis.service";
 import { UploadAsset } from "../upload/entities/upload-asset.entity";
+import { UserBlock } from "./entities/user-block.entity";
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -36,6 +38,8 @@ export class UsersService {
     private readonly userRoles: Repository<UserRole>,
     @InjectRepository(UploadAsset)
     private readonly uploadAssets: Repository<UploadAsset>,
+    @InjectRepository(UserBlock)
+    private readonly blocks: Repository<UserBlock>,
     @Inject(STORAGE) private readonly storage: StorageProvider,
     private readonly redis: RedisService,
     private readonly media: MediaAccessService,
@@ -58,6 +62,34 @@ export class UsersService {
   async removeByAdmin(id: string) {
     return this.removeAccount(id, true);
   }
+  async listBlockedUsers(userId: string) {
+    const blocks = await this.blocks.find({
+      where: { blocker: { id: userId } },
+      relations: { blocked: true },
+      order: { createdAt: "DESC" },
+    });
+    return blocks.map(({ blocked, createdAt }) => ({
+      id: blocked.id,
+      name: blocked.name,
+      avatarUrl: blocked.avatarUrl,
+      blockedAt: createdAt,
+    }));
+  }
+  async blockUser(userId: string, blockedId: string) {
+    if (blockedId === userId) throw new BadRequestException("You cannot block yourself");
+    const [blocker, blocked, existing] = await Promise.all([
+      this.users.findOneBy({ id: userId }),
+      this.users.findOneBy({ id: blockedId }),
+      this.blocks.findOne({ where: { blocker: { id: userId }, blocked: { id: blockedId } } }),
+    ]);
+    if (!blocker || !blocked) throw new NotFoundException("User not found");
+    if (!existing) await this.blocks.save(this.blocks.create({ blocker, blocked }));
+    return { success: true, alreadyBlocked: !!existing };
+  }
+  async unblockUser(userId: string, blockedId: string) {
+    const result = await this.blocks.delete({ blocker: { id: userId }, blocked: { id: blockedId } });
+    return { success: true, removed: !!result.affected };
+  }
   private async removeAccount(id: string, allowSuperAdmin: boolean) {
     const user = await this.users.findOneBy({ id });
     if (!user) throw new NotFoundException("User not found");
@@ -69,12 +101,8 @@ export class UsersService {
         "Super administrators cannot delete their own account",
       );
 
-    const [privateCocktails, allCocktails, ownedAssets, otherUsers] =
+    const [allCocktails, ownedAssets, otherUsers] =
       await Promise.all([
-        this.cocktails.find({
-          where: { owner: { id }, isPrivate: true },
-          withDeleted: true,
-        }),
         this.cocktails.find({
           relations: { owner: true },
           withDeleted: true,
@@ -82,19 +110,36 @@ export class UsersService {
         this.uploadAssets.find({ where: { owner: { id } } }),
         this.users.find({ where: { id: Not(id) } }),
       ]);
-    const privateIds = privateCocktails.map((cocktail) => cocktail.id);
-    const privateRevisions = privateIds.length
+    const ownedCocktailsOnly = allCocktails.filter(
+      (cocktail) => cocktail.owner?.id === id,
+    );
+    const ownedIds = ownedCocktailsOnly.map((cocktail) => cocktail.id);
+    const ownedRevisions = ownedIds.length
       ? await this.revisions.find({
-          where: { cocktail: { id: In(privateIds) } },
+          where: { cocktail: { id: In(ownedIds) } },
         })
       : [];
+    const candidateImages = new Set([
+      ...(user.avatarUrl ? [user.avatarUrl] : []),
+      ...ownedAssets.map((asset) => asset.url),
+      ...ownedCocktailsOnly.flatMap((cocktail) => cocktail.images ?? []),
+      ...ownedRevisions.flatMap((revision) =>
+        this.revisionImages(revision.content),
+      ),
+    ]);
+    const referencedRevisionImages: Array<{ image: string }> =
+      candidateImages.size
+        ? await this.revisions.manager.query(
+            `SELECT DISTINCT image FROM cocktail_revisions revision LEFT JOIN cocktails cocktail ON cocktail.id = revision."cocktailId" CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(revision.content->'images', '[]'::jsonb)) image WHERE cocktail."ownerId" IS DISTINCT FROM $2 AND image = ANY($1::text[])`,
+            [[...candidateImages], id],
+          )
+        : [];
     const retainedImages = new Set(
       [
         ...allCocktails
-          .filter(
-            (cocktail) => cocktail.owner?.id !== id || !cocktail.isPrivate,
-          )
+          .filter((cocktail) => cocktail.owner?.id !== id)
           .flatMap((cocktail) => cocktail.images ?? []),
+        ...referencedRevisionImages.map(({ image }) => image),
         ...otherUsers.flatMap((other) =>
           other.avatarUrl ? [other.avatarUrl] : [],
         ),
@@ -103,22 +148,17 @@ export class UsersService {
     const filesToRemove = new Set([
       ...(user.avatarUrl ? [user.avatarUrl] : []),
       ...ownedAssets.map((asset) => asset.url),
-      ...privateCocktails.flatMap((cocktail) => cocktail.images ?? []),
-      ...privateRevisions.flatMap((revision) =>
+      ...ownedCocktailsOnly.flatMap((cocktail) => cocktail.images ?? []),
+      ...ownedRevisions.flatMap((revision) =>
         this.revisionImages(revision.content),
       ),
     ]);
     for (const retained of retainedImages) filesToRemove.delete(retained);
 
-    const ownerDeletedAt = new Date();
     await this.users.manager.transaction(async (manager) => {
       await manager.query(
-        `DELETE FROM "cocktails" WHERE "ownerId" = $1 AND "isPrivate" = true`,
+        `DELETE FROM "cocktails" WHERE "ownerId" = $1`,
         [id],
-      );
-      await manager.query(
-        `UPDATE "cocktails" SET "ownerDeletedAt" = $1 WHERE "ownerId" = $2 AND "isPrivate" = false`,
-        [ownerDeletedAt, id],
       );
       const result = await manager.delete(User, { id });
       if (!result.affected) throw new NotFoundException("User not found");
@@ -129,6 +169,7 @@ export class UsersService {
         this.redis.del("list:v1:*"),
         this.redis.del("list:v2:*"),
         this.redis.del("list:v3:*"),
+        this.redis.del("list:v4:*"),
         this.redis.del("rec:v1:*"),
         this.redis.del("daily-recommendations:v1:*"),
       ]),
@@ -187,12 +228,24 @@ export class UsersService {
     };
   }
   async listFavorites(userId: string) {
-    const rows = await this.favorites.find({
-      where: { user: { id: userId } },
-      relations: { cocktail: true },
-      order: { createdAt: "DESC" },
-    });
-    return rows.map(({ cocktail, createdAt }) => ({ cocktail, createdAt }));
+    const [rows, blockedUsers] = await Promise.all([
+      this.favorites.find({
+        where: { user: { id: userId } },
+        relations: { cocktail: { owner: true } },
+        order: { createdAt: "DESC" },
+      }),
+      this.blocks.find({
+        where: { blocker: { id: userId } },
+        relations: { blocked: true },
+      }),
+    ]);
+    const blocked = new Set(blockedUsers.map((item) => item.blocked.id));
+    return rows
+      .filter(({ cocktail }) => !cocktail.owner || !blocked.has(cocktail.owner.id))
+      .map(({ cocktail, createdAt }) => {
+        const { owner, ...safeCocktail } = cocktail;
+        return { cocktail: safeCocktail, createdAt };
+      });
   }
   async addFavorite(userId: string, cocktailId: string) {
     const [user, cocktail, existing] = await Promise.all([

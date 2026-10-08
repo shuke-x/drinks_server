@@ -43,6 +43,19 @@ accessToken 有效 15 分钟。`POST /api/v1/auth/refresh` 的 body 为 `{ "refr
 | GET    | `/api/v1/users/me/favorites` |                                           | 返回按收藏时间倒序的酒单               |
 | POST   | `/api/v1/users/me/favorites` | `{ "cocktailId":"ne" }`                   | 收藏酒单                               |
 | DELETE | `/api/v1/users/me/favorites` | `{ "cocktailId":"ne" }`                   | 取消收藏                               |
+| GET    | `/api/v1/users/me/blocked-users` | — | 当前用户屏蔽名单 |
+| POST   | `/api/v1/users/me/blocked-users/:userId` | — | 屏蔽用户 |
+| DELETE | `/api/v1/users/me/blocked-users/:userId` | — | 取消屏蔽 |
+
+公开用户酒单举报与处理：
+
+| 方法 | 路径 | body | 说明 |
+| --- | --- | --- | --- |
+| POST | `/api/v1/cocktails/:id/reports` | `{ "reason":"privacy", "details":"…" }` | 登录用户举报公开用户酒单；每位用户对同一酒单只创建一条举报 |
+| GET | `/api/v1/admin/reports` | — | `reports.manage` 权限；按时间列出最多 200 条待处理举报 |
+| PATCH | `/api/v1/admin/reports/:id` | `{ "status":"reviewed" }` 或 `{ "status":"dismissed" }` | 标记已处理或不成立 |
+
+可用举报原因：`harassment`、`hate`、`sexual`、`dangerous`、`privacy`、`copyright`、`spam`、`other`。用户屏蔽后，屏蔽发布者的酒单会从列表、推荐、随机结果及详情中隐藏。处理举报时，若需下架酒单，请使用现有 `/admin/cocktails/:id/offline` 审核接口。
 
 启动服务：
 

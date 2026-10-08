@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Patch,
+  Param,
   Post,
   Query,
   Req,
@@ -55,6 +56,21 @@ export class UsersController {
   })
   remove(@Req() req: AuthRequest) {
     return this.users.removeMe(req.authUser.id);
+  }
+  @Get("blocked-users")
+  @ApiOperation({ summary: "获取当前用户屏蔽的用户" })
+  blockedUsers(@Req() req: AuthRequest) {
+    return this.users.listBlockedUsers(req.authUser.id);
+  }
+  @Post("blocked-users/:userId")
+  @ApiOperation({ summary: "屏蔽用户" })
+  blockUser(@Req() req: AuthRequest, @Param("userId") userId: string) {
+    return this.users.blockUser(req.authUser.id, userId);
+  }
+  @Delete("blocked-users/:userId")
+  @ApiOperation({ summary: "取消屏蔽用户" })
+  unblockUser(@Req() req: AuthRequest, @Param("userId") userId: string) {
+    return this.users.unblockUser(req.authUser.id, userId);
   }
   @Get("cocktails")
   @ApiOperation({ summary: "获取当前用户创建的酒单" })

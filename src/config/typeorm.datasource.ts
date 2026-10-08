@@ -16,6 +16,8 @@ import { CocktailRevision } from "../modules/cocktails/entities/cocktail-revisio
 import { CocktailCategory } from "../modules/cocktails/entities/cocktail-category.entity";
 import { UploadAsset } from "../modules/upload/entities/upload-asset.entity";
 import { DailyRecommendation } from "../modules/cocktails/entities/daily-recommendation.entity";
+import { CocktailReport } from "../modules/cocktails/entities/cocktail-report.entity";
+import { UserBlock } from "../modules/users/entities/user-block.entity";
 export default new DataSource({
   type: "postgres",
   host: process.env.DB_HOST ?? "localhost",
@@ -23,7 +25,7 @@ export default new DataSource({
   username: process.env.DB_USER ?? "drinks",
   password: process.env.DB_PASS ?? "drinks",
   database: process.env.DB_NAME ?? "tonight_drinks",
-  entities: [DrinkRecordEntity, FlavorEntity, Cocktail, CocktailCategory, CocktailReviewLog, CocktailRevision, DailyRecommendation, User, RefreshToken, Favorite, Role, Permission, UserRole, RolePermission, AdminAuditLog, AdminImportJob, UploadAsset],
+  entities: [DrinkRecordEntity, FlavorEntity, Cocktail, CocktailCategory, CocktailReviewLog, CocktailRevision, DailyRecommendation, CocktailReport, UserBlock, User, RefreshToken, Favorite, Role, Permission, UserRole, RolePermission, AdminAuditLog, AdminImportJob, UploadAsset],
   migrations: [join(__dirname, "../../migrations/*{.ts,.js}")],
   synchronize: false,
 });

@@ -11,6 +11,7 @@ import { UserRole } from "../admin/entities/user-role.entity";
 import { UploadModule } from "../upload/upload.module";
 import { RedisModule } from "../redis/redis.module";
 import { UploadAsset } from "../upload/entities/upload-asset.entity";
+import { UserBlock } from "./entities/user-block.entity";
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -20,6 +21,7 @@ import { UploadAsset } from "../upload/entities/upload-asset.entity";
       CocktailRevision,
       UserRole,
       UploadAsset,
+      UserBlock,
     ]),
     AuthModule,
     UploadModule,

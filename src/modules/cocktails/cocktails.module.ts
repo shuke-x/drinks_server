@@ -12,10 +12,17 @@ import { CocktailRevision } from "./entities/cocktail-revision.entity";
 import { CocktailsController } from "./cocktails.controller";
 import { CocktailsService } from "./cocktails.service";
 import { DailyRecommendation } from "./entities/daily-recommendation.entity";
+import { CocktailReport } from "./entities/cocktail-report.entity";
+import { CocktailReportsController } from "./cocktail-reports.controller";
+import { CocktailReportsService } from "./cocktail-reports.service";
+import { UserRole } from "../admin/entities/user-role.entity";
+import { RolePermission } from "../admin/entities/role-permission.entity";
+import { PermissionsGuard } from "../admin/guards/permissions.guard";
+import { UserBlock } from "../users/entities/user-block.entity";
 @Module({
-  imports: [UploadModule,TypeOrmModule.forFeature([Cocktail, CocktailCategory, CocktailReviewLog, CocktailRevision, DailyRecommendation, User]), AuthModule],
-  controllers: [CocktailsController, CocktailCategoriesController],
-  providers: [CocktailsService, CocktailCategoriesService],
+  imports: [UploadModule,TypeOrmModule.forFeature([Cocktail, CocktailCategory, CocktailReviewLog, CocktailRevision, DailyRecommendation, CocktailReport, UserBlock, User, UserRole, RolePermission]), AuthModule],
+  controllers: [CocktailsController, CocktailCategoriesController, CocktailReportsController],
+  providers: [CocktailsService, CocktailCategoriesService, CocktailReportsService, PermissionsGuard],
   exports: [CocktailsService, CocktailCategoriesService],
 })
 export class CocktailsModule {}

@@ -14,9 +14,10 @@ describe("UsersService.removeMe", () => {
     },
   };
   const cocktails = { find: jest.fn(), findAndCount: jest.fn() };
-  const revisions = { find: jest.fn() };
+  const revisions = { find: jest.fn(), manager: { query: jest.fn() } };
   const userRoles = { exists: jest.fn() };
   const uploadAssets = { find: jest.fn() };
+  const blocks = { find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn((value) => value), delete: jest.fn() };
   const storage = { remove: jest.fn() };
   const redis = { del: jest.fn() };
   const service = new UsersService(
@@ -26,6 +27,7 @@ describe("UsersService.removeMe", () => {
     revisions as never,
     userRoles as never,
     uploadAssets as never,
+    blocks as never,
     storage as never,
     redis as never,
     {assertOwned:jest.fn().mockResolvedValue(undefined)} as never,
@@ -36,6 +38,7 @@ describe("UsersService.removeMe", () => {
     cocktails.find.mockResolvedValue([]);
     users.find.mockResolvedValue([]);
     revisions.find.mockResolvedValue([]);
+    revisions.manager.query.mockResolvedValue([]);
     uploadAssets.find.mockResolvedValue([]);
     storage.remove.mockResolvedValue(undefined);
     redis.del.mockResolvedValue(undefined);
@@ -52,7 +55,7 @@ describe("UsersService.removeMe", () => {
     });
     expect(manager.query).toHaveBeenNthCalledWith(
       1,
-      `DELETE FROM "cocktails" WHERE "ownerId" = $1 AND "isPrivate" = true`,
+      `DELETE FROM "cocktails" WHERE "ownerId" = $1`,
       ["user-1"],
     );
     expect(manager.delete).toHaveBeenCalledWith(expect.any(Function), {
@@ -118,25 +121,28 @@ describe("UsersService.removeMe", () => {
     expect(result.data[0].base).toBe("金酒");
   });
 
-  it("removes images used only by private cocktails", async () => {
+  it("removes owned public and private content while preserving shared images", async () => {
     users.findOneBy.mockResolvedValue({
       id: "user-1",
       avatarUrl: "https://example.com/static/avatar.jpg",
     });
     userRoles.exists.mockResolvedValue(false);
-    cocktails.find
-      .mockResolvedValueOnce([
+    cocktails.find.mockResolvedValue([
         {
           id: "private-1",
-          images: [
-            "https://example.com/static/private.jpg",
-            "https://example.com/static/shared.jpg",
-          ],
+          owner: { id: "user-1" },
+          isPrivate: true,
+          images: ["https://example.com/static/private.jpg", "https://example.com/static/shared.jpg"],
         },
-      ])
-      .mockResolvedValueOnce([
         {
-          id: "public-1",
+          id: "public-owned",
+          owner: { id: "user-1" },
+          isPrivate: false,
+          images: ["https://example.com/static/public.jpg"],
+        },
+        {
+          id: "public-other",
+          owner: { id: "user-2" },
           images: ["https://example.com/static/shared.jpg"],
         },
       ]);
@@ -144,6 +150,9 @@ describe("UsersService.removeMe", () => {
       {
         content: { images: ["https://example.com/static/revision.jpg"] },
       },
+    ]);
+    revisions.manager.query.mockResolvedValue([
+      { image: "https://example.com/static/shared-revision.jpg" },
     ]);
     uploadAssets.find.mockResolvedValue([
       { url: "https://example.com/static/unbound.jpg" },
@@ -158,6 +167,9 @@ describe("UsersService.removeMe", () => {
       "https://example.com/static/private.jpg",
     );
     expect(storage.remove).toHaveBeenCalledWith(
+      "https://example.com/static/public.jpg",
+    );
+    expect(storage.remove).toHaveBeenCalledWith(
       "https://example.com/static/revision.jpg",
     );
     expect(storage.remove).toHaveBeenCalledWith(
@@ -165,6 +177,9 @@ describe("UsersService.removeMe", () => {
     );
     expect(storage.remove).not.toHaveBeenCalledWith(
       "https://example.com/static/shared.jpg",
+    );
+    expect(storage.remove).not.toHaveBeenCalledWith(
+      "https://example.com/static/shared-revision.jpg",
     );
   });
 });
