@@ -17,10 +17,13 @@ export class AccessTokenGuard implements CanActivate {
     const req = context
       .switchToHttp()
       .getRequest<Request & { authUser?: { id: string; email: string } }>();
-    const token = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? readCookie(req, ACCESS_COOKIE);
+    const authorization = req.headers.authorization;
+    const bearer = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+    if (authorization && !bearer) throw new UnauthorizedException("Invalid Authorization header");
+    const token = bearer ?? (this.auth.cookieEnabled() ? readCookie(req, ACCESS_COOKIE) : undefined);
     if (!token)
       throw new UnauthorizedException("Bearer access token is required");
-    const payload = this.auth.verifyAccess(token);
+    const payload = await this.auth.verifySessionAccess(token, !bearer);
     const user = await this.users.findOneBy({ id: payload.sub });
     if (!user || user.status === UserStatus.DISABLED)
       throw new UnauthorizedException("User account is disabled");
@@ -37,10 +40,10 @@ export class OptionalAccessTokenGuard implements CanActivate {
       .switchToHttp()
       .getRequest<Request & { authUser?: { id: string; email: string } }>();
     const authorization = req.headers.authorization;
-    const cookieToken = readCookie(req, ACCESS_COOKIE);
+    const cookieToken = this.auth.cookieEnabled() ? readCookie(req, ACCESS_COOKIE) : undefined;
     if (!authorization && !cookieToken) return true;
     if (!authorization && cookieToken) {
-      const payload = this.auth.verifyAccess(cookieToken);
+      const payload = await this.auth.verifySessionAccess(cookieToken, true);
       const user = await this.users.findOneBy({ id: payload.sub });
       if (!user || user.status === UserStatus.DISABLED) throw new UnauthorizedException("User account is disabled");
       req.authUser = { id: payload.sub, email: payload.email };
@@ -48,7 +51,7 @@ export class OptionalAccessTokenGuard implements CanActivate {
     }
     const token = authorization!.match(/^Bearer\s+(.+)$/i)?.[1];
     if (!token) throw new UnauthorizedException("Invalid Authorization header");
-    const payload = this.auth.verifyAccess(token);
+    const payload = await this.auth.verifySessionAccess(token, !req.headers.authorization);
     const user = await this.users.findOneBy({ id: payload.sub });
     if (!user || user.status === UserStatus.DISABLED)
       throw new UnauthorizedException("User account is disabled");

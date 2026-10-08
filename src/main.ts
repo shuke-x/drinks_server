@@ -10,6 +10,7 @@ import { AppModule } from "./app.module";
 import { ResponseInterceptor } from "./common/interceptors/response.interceptor";
 import { AllExceptionFilter } from "./common/filters/http-exception.filter";
 import helmet from "helmet";
+import { AuthService } from "./modules/auth/auth.service";
 import { cookieSessionSecurity } from "./common/middleware/cookie-session-security.middleware";
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
@@ -29,6 +30,8 @@ async function bootstrap() {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
+  const cookieEnabled = env.get<string>("AUTH_COOKIE_ENABLED", "false") === "true";
+  if (cookieEnabled && corsOrigins.length === 0) throw new Error("Cookie sessions require explicit CORS_ORIGINS, including the admin origin");
   const expressApp = app.getHttpAdapter().getInstance();
   expressApp.set("trust proxy", env.get<string>("TRUST_PROXY", "loopback"));
   app.use(
@@ -56,12 +59,14 @@ async function bootstrap() {
       "DELETE",
       "OPTIONS",
     ],
-    allowedHeaders: ["Authorization", "Content-Type", "X-Record-Account"],
+    allowedHeaders: ["Authorization", "Content-Type", "X-Record-Account", "X-CSRF-Token", "X-Auth-Mode"],
+    credentials: cookieEnabled,
     maxAge: 86400,
   });
   app.use(cookieSessionSecurity(
-    env.get<string>("AUTH_COOKIE_ENABLED", "false") === "true",
+    cookieEnabled,
     corsOrigins,
+    (token, refreshToken) => app.get(AuthService).validCsrf(token, refreshToken),
   ));
   app.useGlobalPipes(
     new ValidationPipe({

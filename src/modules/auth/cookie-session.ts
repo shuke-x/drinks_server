@@ -26,3 +26,10 @@ export function csrfMatches(request: Request): boolean {
   const a = Buffer.from(cookie); const b = Buffer.from(token);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+/** Explicit opt-in for bootstrap; existing browser cookies keep subsequent requests in cookie mode. */
+export function wantsCookieSession(request: Request): boolean {
+  return request.headers["x-auth-mode"] === "cookie" || Boolean(
+    readCookie(request, ACCESS_COOKIE) || readCookie(request, REFRESH_COOKIE) || readCookie(request, CSRF_COOKIE),
+  );
+}

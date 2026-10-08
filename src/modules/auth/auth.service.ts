@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   ConflictException,
   Injectable,
   UnauthorizedException,
@@ -19,6 +20,7 @@ import {
   randomBytes,
   randomInt,
   randomUUID,
+  timingSafeEqual,
 } from "crypto";
 import { Repository } from "typeorm";
 import { RedisService } from "../redis/redis.service";
@@ -32,14 +34,14 @@ import { UserRole } from "../admin/entities/user-role.entity";
 import { RolePermission } from "../admin/entities/role-permission.entity";
 import { hashPassword, verifyPasswordHash } from "./password-hash.util";
 
-type Challenge = { nonce: string; expiresAt: string };
+type Challenge = { nonce: string; expiresAt: string; csrfDigest?: string };
 type Credentials = {
   email: string;
   password: string;
   name?: string;
   code?: string;
 };
-type JwtPayload = { sub: string; email: string; exp: number; type: "access" };
+type JwtPayload = { sub: string; email: string; exp: number; type: "access"; sid?: string };
 const base64url = (value: Buffer | string) =>
   Buffer.from(value).toString("base64url");
 
@@ -48,7 +50,7 @@ export class AuthService {
   private readonly privateKey;
   private readonly publicKey: string;
   private readonly jwtSecret: string;
-  private readonly accessTtl = 15 * 60;
+  private readonly accessTtl = 10 * 60;
   private readonly refreshDays: number;
   constructor(
     private readonly config: ConfigService,
@@ -79,16 +81,18 @@ export class AuthService {
       Math.max(7, Number(config.get("AUTH_REFRESH_DAYS", 30))),
     );
   }
-  async createChallenge() {
+  async createChallenge(cookieMode = false, refreshToken?: string) {
     const challengeId = randomUUID(),
       nonce = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + 120000);
+    const csrfToken = cookieMode ? (refreshToken ? this.sessionCsrf(refreshToken) : `c.${challengeId}.${randomBytes(32).toString("base64url")}`) : undefined;
     await this.redis.withTTL(
       `auth:challenge:${challengeId}`,
-      { nonce, expiresAt: expiresAt.toISOString() },
+      { nonce, expiresAt: expiresAt.toISOString(), ...(csrfToken ? { csrfDigest: this.hash(csrfToken) } : {}) },
       120,
     );
     return {
+      ...(csrfToken ? { csrfToken } : {}),
       challengeId,
       publicKey: this.publicKey,
       nonce,
@@ -173,8 +177,8 @@ export class AuthService {
       .digest("hex");
   }
 
-  async register(challengeId: string, ciphertext: string) {
-    const payload = await this.consumeCredentials(challengeId, ciphertext);
+  async register(challengeId: string, ciphertext: string, csrfToken?: string) {
+    const payload = await this.consumeCredentials(challengeId, ciphertext, csrfToken);
     const email = payload.email.trim().toLowerCase();
     if (await this.users.exists({ where: { email } }))
       throw new ConflictException("Email is already registered");
@@ -191,8 +195,8 @@ export class AuthService {
     );
     return this.issueTokens(user);
   }
-  async login(challengeId: string, ciphertext: string) {
-    const payload = await this.consumeCredentials(challengeId, ciphertext);
+  async login(challengeId: string, ciphertext: string, csrfToken?: string) {
+    const payload = await this.consumeCredentials(challengeId, ciphertext, csrfToken);
     const user = await this.users
       .createQueryBuilder("user")
       .addSelect("user.passwordHash")
@@ -207,18 +211,23 @@ export class AuthService {
     return this.issueTokens(user);
   }
   async refresh(raw: string) {
-    const hash = this.hash(raw);
-    const record = await this.refreshTokens.findOne({
-      where: { tokenHash: hash },
-      relations: { user: true },
+    // Lock and rotate in one transaction: concurrent reuse cannot issue two sessions.
+    return this.refreshTokens.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(RefreshToken);
+      const record = await repository.findOne({
+        where: { tokenHash: this.hash(raw) },
+        lock: { mode: "pessimistic_write" },
+      });
+      if (!record || record.revokedAt || record.expiresAt <= new Date())
+        throw new UnauthorizedException("Refresh token is invalid or expired");
+      const user = await manager.getRepository(User).createQueryBuilder("user")
+        .innerJoin("user.refreshTokens", "refresh", "refresh.id = :id", { id: record.id }).getOne();
+      if (!user || user.status === UserStatus.DISABLED)
+        throw new UnauthorizedException("User account is disabled");
+      record.revokedAt = new Date();
+      await repository.save(record);
+      return this.issueTokens(user, repository);
     });
-    if (!record || record.revokedAt || record.expiresAt <= new Date())
-      throw new UnauthorizedException("Refresh token is invalid or expired");
-    if (record.user.status === UserStatus.DISABLED)
-      throw new UnauthorizedException("User account is disabled");
-    record.revokedAt = new Date();
-    await this.refreshTokens.save(record);
-    return this.issueTokens(record.user);
   }
   async logout(raw: string) {
     const record = await this.refreshTokens.findOne({
@@ -259,9 +268,40 @@ export class AuthService {
       permissions: [...new Set(pairs.map((pair) => pair.permission.code))],
     };
   }
+  cookieEnabled() { return this.config.get("AUTH_COOKIE_ENABLED", "false") === "true"; }
+
+  sessionCsrf(refreshToken: string) {
+    const nonce = randomBytes(32).toString("base64url");
+    return `s.${nonce}.${this.csrfSignature(refreshToken, nonce)}`;
+  }
+
+  private csrfSignature(refreshToken: string, nonce: string) {
+    return createHmac("sha256", this.jwtSecret).update(`csrf:${this.hash(refreshToken)}:${nonce}`).digest("base64url");
+  }
+
+  async validCsrf(token: string, refreshToken?: string) {
+    const [kind, value, signature, extra] = token.split(".");
+    if (extra || !value || !signature) return false;
+    if (refreshToken) return kind === "s" && timingSafeEqualText(signature, this.csrfSignature(refreshToken, value));
+    if (kind !== "c") return false;
+    const challenge = await this.redis.get<Challenge>(`auth:challenge:${value}`);
+    return Boolean(challenge?.csrfDigest && new Date(challenge.expiresAt) > new Date() && timingSafeEqualText(challenge.csrfDigest, this.hash(token)));
+  }
+
+  async verifySessionAccess(token: string, requireSession = false): Promise<JwtPayload> {
+    const payload = this.verifyAccess(token);
+    if (requireSession && !payload.sid) throw new UnauthorizedException("Session is required");
+    if (payload.sid) {
+      const session = await this.refreshTokens.findOne({ where: { tokenHash: payload.sid }, relations: { user: true } });
+      if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.id !== payload.sub)
+        throw new UnauthorizedException("Session has ended");
+    }
+    return payload;
+  }
+
   verifyAccess(token: string): JwtPayload {
-    const [header, body, signature] = token.split(".");
-    if (!header || !body || !signature)
+    const [header, body, signature, extra] = token.split(".");
+    if (!header || !body || !signature || extra)
       throw new UnauthorizedException("Invalid access token");
     const expected = base64url(
       createHmac("sha256", this.jwtSecret).update(`${header}.${body}`).digest(),
@@ -278,8 +318,9 @@ export class AuthService {
       throw new UnauthorizedException("Invalid access token");
     }
     if (
-      payload.type !== "access" ||
-      !payload.sub ||
+      !payload || payload.type !== "access" ||
+      typeof payload.sub !== "string" || !payload.sub ||
+      !Number.isFinite(payload.exp) ||
       payload.exp <= Math.floor(Date.now() / 1000)
     )
       throw new UnauthorizedException("Access token expired");
@@ -288,7 +329,12 @@ export class AuthService {
   private async consumeCredentials(
     challengeId: string,
     ciphertext: string,
+    csrfToken?: string,
   ): Promise<Credentials> {
+    const pending = await this.redis.get<Challenge>(`auth:challenge:${challengeId}`);
+    if (!pending || new Date(pending.expiresAt) <= new Date()) throw new UnauthorizedException("Challenge is invalid or expired");
+    if (pending.csrfDigest ? (!csrfToken || !timingSafeEqualText(pending.csrfDigest, this.hash(csrfToken))) : Boolean(csrfToken))
+      throw new ForbiddenException("Challenge CSRF binding is invalid");
     const challenge = await this.redis.take<Challenge>(
       `auth:challenge:${challengeId}`,
     );
@@ -321,20 +367,21 @@ export class AuthService {
       );
     return decoded;
   }
-  private async issueTokens(user: User) {
+  private async issueTokens(user: User, repository = this.refreshTokens) {
+    const refreshToken = randomBytes(48).toString("base64url");
     const now = Math.floor(Date.now() / 1000);
     const accessPayload: JwtPayload = {
       sub: user.id,
       email: user.email,
       exp: now + this.accessTtl,
       type: "access",
+      sid: this.hash(refreshToken),
     };
     const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
     const body = base64url(JSON.stringify(accessPayload));
     const accessToken = `${header}.${body}.${base64url(createHmac("sha256", this.jwtSecret).update(`${header}.${body}`).digest())}`;
-    const refreshToken = randomBytes(48).toString("base64url");
-    await this.refreshTokens.save(
-      this.refreshTokens.create({
+    await repository.save(
+      repository.create({
         tokenHash: this.hash(refreshToken),
         user,
         expiresAt: new Date(Date.now() + this.refreshDays * 86400000),
@@ -358,8 +405,5 @@ export class AuthService {
   }
 }
 function timingSafeEqualText(a: string, b: string) {
-  return createHash("sha256")
-    .update(a)
-    .digest()
-    .equals(createHash("sha256").update(b).digest());
+  return timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest());
 }

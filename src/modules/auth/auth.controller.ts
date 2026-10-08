@@ -15,8 +15,7 @@ import { RedisRateLimitGuard } from "../../common/security/redis-rate-limit.guar
 import { AccessTokenGuard } from "./access-token.guard";
 import { Request, Response } from "express";
 import { ConfigService } from "@nestjs/config";
-import { randomBytes } from "crypto";
-import { ACCESS_COOKIE, CSRF_COOKIE, readCookie, REFRESH_COOKIE } from "./cookie-session";
+import { ACCESS_COOKIE, CSRF_COOKIE, readCookie, REFRESH_COOKIE, wantsCookieSession } from "./cookie-session";
 
 type AuthRequest = Request & { authUser: { id: string } };
 
@@ -31,10 +30,14 @@ export class AuthController {
   @ApiOperation({ summary: "获取一次性登录/注册挑战" })
   @ApiOkResponse({
     description:
-      "响应 data 包含 challengeId、PEM publicKey、nonce 与 expiresAt；挑战有效期为 2 分钟。",
+      "响应 data 包含 challengeId、PEM publicKey、nonce 与 expiresAt；挑战有效期为 2 分钟。Cookie 模式需 X-Auth-Mode: cookie，会签发 backbar_csrf。",
   })
-  challenge() {
-    return this.auth.createChallenge();
+  async challenge(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    const cookieMode = this.cookieEnabled() && wantsCookieSession(request);
+    const { csrfToken, ...challenge } = await this.auth.createChallenge(cookieMode, cookieMode ? readCookie(request, REFRESH_COOKIE) : undefined);
+    response.setHeader("Cache-Control", "no-store");
+    if (csrfToken) response.cookie(CSRF_COOKIE, csrfToken, { ...this.cookieOptions(), httpOnly: false, maxAge: this.refreshMaxAge() });
+    return challenge;
   }
 
   @Post("registration-code")
@@ -63,12 +66,12 @@ export class AuthController {
       "明文为 { email, password, name?, code? }，需先以 challenge 公钥加密；code 为后续扩展字段，当前不校验。",
   })
   @ApiCreatedResponse({
-    description: "响应 data 包含 accessToken、refreshToken、expiresIn。",
+    description: "Bearer 模式返回 accessToken、refreshToken、expiresIn；Cookie 模式仅返回 expiresIn，通过 Set-Cookie 建立会话。",
   })
-  async register(@Body() dto: EncryptedAuthDto, @Res({ passthrough: true }) response: Response) {
-    const tokens = await this.auth.register(dto.challengeId, dto.ciphertext);
-    this.writeCookies(response, tokens);
-    return tokens;
+  async register(@Body() dto: EncryptedAuthDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    const cookieMode = this.cookieEnabled() && wantsCookieSession(request);
+    const tokens = await this.auth.register(dto.challengeId, dto.ciphertext, cookieMode ? readCookie(request, CSRF_COOKIE) : undefined);
+    return this.deliverTokens(response, tokens, cookieMode);
   }
 
   @Post("login")
@@ -80,12 +83,12 @@ export class AuthController {
     description: "明文为 { email, password }，需先以 challenge 公钥加密。",
   })
   @ApiOkResponse({
-    description: "响应 data 包含 accessToken、refreshToken、expiresIn。",
+    description: "Bearer 模式返回 accessToken、refreshToken、expiresIn；Cookie 模式仅返回 expiresIn，通过 Set-Cookie 建立会话。",
   })
-  async login(@Body() dto: EncryptedAuthDto, @Res({ passthrough: true }) response: Response) {
-    const tokens = await this.auth.login(dto.challengeId, dto.ciphertext);
-    this.writeCookies(response, tokens);
-    return tokens;
+  async login(@Body() dto: EncryptedAuthDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    const cookieMode = this.cookieEnabled() && wantsCookieSession(request);
+    const tokens = await this.auth.login(dto.challengeId, dto.ciphertext, cookieMode ? readCookie(request, CSRF_COOKIE) : undefined);
+    return this.deliverTokens(response, tokens, cookieMode);
   }
 
   @Post("refresh")
@@ -94,14 +97,14 @@ export class AuthController {
   @ApiOperation({ summary: "刷新令牌" })
   @ApiBody({ type: RefreshDto })
   @ApiOkResponse({
-    description: "旧 refreshToken 会被撤销；响应 data 返回新的 token 对。",
+    description: "旧 refreshToken 会被撤销；Bearer 模式返回新 token 对，Cookie 模式从 Cookie 读取并轮换，不需要 JSON 请求体。",
   })
   async refresh(@Body() dto: RefreshDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
-    const raw = readCookie(request, REFRESH_COOKIE) ?? dto.refreshToken;
+    const cookieMode = this.cookieEnabled() && wantsCookieSession(request);
+    const raw = cookieMode ? readCookie(request, REFRESH_COOKIE) : dto?.refreshToken;
     if (!raw) throw new UnauthorizedException("Refresh token is required");
     const tokens = await this.auth.refresh(raw);
-    this.writeCookies(response, tokens);
-    return tokens;
+    return this.deliverTokens(response, tokens, cookieMode);
   }
 
   @Post("logout")
@@ -111,25 +114,32 @@ export class AuthController {
   @ApiBody({ type: RefreshDto })
   @ApiOkResponse({ description: "响应 data 为 { success: true }。" })
   async logout(@Body() dto: RefreshDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
-    const raw = readCookie(request, REFRESH_COOKIE) ?? dto.refreshToken;
+    const cookieMode = this.cookieEnabled() && wantsCookieSession(request);
+    const raw = cookieMode ? readCookie(request, REFRESH_COOKIE) : dto?.refreshToken;
     if (raw) await this.auth.logout(raw);
-    if (this.cookieEnabled()) {
-      response.clearCookie(ACCESS_COOKIE, { path: "/" });
-      response.clearCookie(REFRESH_COOKIE, { path: "/" });
-      response.clearCookie(CSRF_COOKIE, { path: "/" });
+    response.setHeader("Cache-Control", "no-store");
+    if (cookieMode) {
+      response.clearCookie(ACCESS_COOKIE, { ...this.cookieOptions(), httpOnly: true });
+      response.clearCookie(REFRESH_COOKIE, { ...this.cookieOptions(), httpOnly: true });
+      response.clearCookie(CSRF_COOKIE, { ...this.cookieOptions(), httpOnly: false });
     }
     return { success: true };
   }
 
-  private cookieEnabled() { return this.config.get("AUTH_COOKIE_ENABLED", "false") === "true"; }
-  private writeCookies(response: Response, tokens: { accessToken: string; refreshToken: string; expiresIn: number }) {
-    if (!this.cookieEnabled()) return;
-    const secure = this.config.get("NODE_ENV", "development") === "production";
-    const configuredSameSite = this.config.get("AUTH_COOKIE_SAME_SITE", "lax");
-    const sameSite = configuredSameSite === "none" ? "none" as const : configuredSameSite === "strict" ? "strict" as const : "lax" as const;
-    const common = { secure, sameSite, path: "/" };
+  private cookieEnabled() { return this.auth.cookieEnabled(); }
+  private cookieOptions() {
+    const configured = this.config.get("AUTH_COOKIE_SAME_SITE", "strict");
+    const sameSite = configured === "none" ? "none" as const : configured === "lax" ? "lax" as const : "strict" as const;
+    return { secure: this.config.get("NODE_ENV", "development") === "production" || sameSite === "none", sameSite, path: "/" };
+  }
+  private refreshMaxAge() { return Math.min(30, Math.max(7, Number(this.config.get("AUTH_REFRESH_DAYS", 30)))) * 86400000; }
+  private deliverTokens(response: Response, tokens: { accessToken: string; refreshToken: string; expiresIn: number }, cookieMode: boolean) {
+    response.setHeader("Cache-Control", "no-store");
+    if (!cookieMode) return tokens;
+    const common = this.cookieOptions();
     response.cookie(ACCESS_COOKIE, tokens.accessToken, { ...common, httpOnly: true, maxAge: tokens.expiresIn * 1000 });
-    response.cookie(REFRESH_COOKIE, tokens.refreshToken, { ...common, httpOnly: true, maxAge: Number(this.config.get("AUTH_REFRESH_DAYS", 30)) * 86400000 });
-    response.cookie(CSRF_COOKIE, randomBytes(32).toString("base64url"), { ...common, httpOnly: false, maxAge: Number(this.config.get("AUTH_REFRESH_DAYS", 30)) * 86400000 });
+    response.cookie(REFRESH_COOKIE, tokens.refreshToken, { ...common, httpOnly: true, maxAge: this.refreshMaxAge() });
+    response.cookie(CSRF_COOKIE, this.auth.sessionCsrf(tokens.refreshToken), { ...common, httpOnly: false, maxAge: this.refreshMaxAge() });
+    return { expiresIn: tokens.expiresIn };
   }
 }

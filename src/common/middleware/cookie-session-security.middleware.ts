@@ -1,17 +1,20 @@
-import { ForbiddenException } from "@nestjs/common";
 import type { NextFunction, Request, Response } from "express";
-import { csrfMatches, readCookie, CSRF_COOKIE, REFRESH_COOKIE, ACCESS_COOKIE } from "../../modules/auth/cookie-session";
+import { csrfMatches, readCookie, CSRF_COOKIE, REFRESH_COOKIE, wantsCookieSession } from "../../modules/auth/cookie-session";
 
-export function cookieSessionSecurity(enabled: boolean, allowedOrigins: string[]) {
-  return (request: Request, _response: Response, next: NextFunction) => {
-    if (!enabled || ["GET", "HEAD", "OPTIONS"].includes(request.method)) return next();
-    // Native clients using the legacy Bearer transport are not cookie sessions.
-    if (/^Bearer\s+/i.test(request.headers.authorization ?? "")) return next();
-    const hasSession = Boolean(readCookie(request, ACCESS_COOKIE) || readCookie(request, REFRESH_COOKIE));
-    if (!hasSession) return next();
-    const origin = request.headers.origin;
-    if (!origin || !allowedOrigins.includes(origin)) throw new ForbiddenException("Invalid request origin");
-    if (!readCookie(request, CSRF_COOKIE) || !csrfMatches(request)) throw new ForbiddenException("Invalid CSRF token");
-    return next();
+type CsrfValidator = (token: string, refreshToken?: string) => Promise<boolean>;
+
+export function cookieSessionSecurity(enabled: boolean, allowedOrigins: string[], validCsrf: CsrfValidator) {
+  return async (request: Request, response: Response, next: NextFunction) => {
+    if (!enabled || ["GET", "HEAD", "OPTIONS"].includes(request.method) || !wantsCookieSession(request)) return next();
+    // A Bearer header must never bypass protection when ambient cookies are present.
+    const reject = (message: string) => response.status(403).json({ code: 403, message, data: null });
+    if (!request.headers.origin || !allowedOrigins.includes(request.headers.origin)) return reject("Invalid request origin");
+    if (!csrfMatches(request)) return reject("Invalid CSRF token");
+    // Login/register verify the stored challenge binding before consuming credentials.
+    if (/^\/api\/v1\/auth\/(login|register)\/?$/.test(request.path)) return next();
+    try {
+      if (!await validCsrf(readCookie(request, CSRF_COOKIE)!, readCookie(request, REFRESH_COOKIE))) return reject("Invalid CSRF binding");
+      return next();
+    } catch (error) { return next(error); }
   };
 }
