@@ -14,6 +14,11 @@ describe('private image authorization',()=>{
  it('allows published references without granting unrelated image access',async()=>{
   db.query.mockResolvedValueOnce([{}]);await expect(access.assertReadable(key,undefined)).resolves.toBeUndefined();
  });
+ it('allows configured flavor cover images through the public flavor list',async()=>{
+  db.query.mockResolvedValueOnce([{}]);
+  await expect(access.assertReadable(key,undefined)).resolves.toBeUndefined();
+  expect(db.query.mock.calls[0][0]).toContain('flavor_directions');
+ });
  it('binds temporary grants to image and identity and rechecks ownership',async()=>{
   const token=new URL(access.sign(url,'owner')).searchParams.get('access');
   db.query.mockResolvedValueOnce([]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]);

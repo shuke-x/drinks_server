@@ -25,7 +25,7 @@ const enabled=process.env.EXPERIENCE_TEST_DB==='true';
  let app:INestApplication,db:DataSource;
  const owner=randomUUID(),other=randomUUID(),admin=randomUUID();
  const record={id:'record-1',name:'测试酸酒',occurredAt:new Date().toISOString(),scene:'home',verdict:'liked',note:'private note',actualRecipe:[{n:'苦精',t:'2 dash'}],reference:{id:'source',zh:'原配方',en:'Source',base:'金酒',recipe:[{n:'Gin',ml:30}]}};
- const flavor={id:'test-flavor',zh:'测试风味',en:'Test',zhSubtitle:'描述',enSubtitle:'Description',keywords:['茶'],icon:'tea',color:'#30D158',primaryWeight:9,secondaryWeight:1,isActive:true,sortOrder:99};
+ const flavor={id:'test-flavor',zh:'测试风味',en:'Test',zhSubtitle:'描述',enSubtitle:'Description',keywords:['茶'],icon:'tea',color:'#30D158',imageUrl:'https://cdn.example.com/flavor.webp',primaryWeight:9,secondaryWeight:1,isActive:true,sortOrder:99};
  const api=(method:'get'|'post'|'patch'|'delete',path:string,user=owner)=>request(app.getHttpServer())[method](`/api/v1${path}`).set('Authorization',`Bearer ${user}`);
  beforeAll(async()=>{
   const module=await Test.createTestingModule({imports:[TypeOrmModule.forRoot({...source.options,host:'127.0.0.1',port:Number(process.env.EXPERIENCE_TEST_PORT||55439),database:'security_test',username:'drinks',password:'drinks',synchronize:false,migrationsRun:true} as any),TypeOrmModule.forFeature([UserRole,RolePermission])],controllers:[RecordsController,FlavorsController,AdminRecordsController,AdminFlavorsController,RecordSharingController,PublicRecordsController],providers:[ExperienceService,PermissionsGuard,RecordSharingService]})
@@ -136,7 +136,7 @@ const enabled=process.env.EXPERIENCE_TEST_DB==='true';
   await api('post','/admin/flavor-directions',admin).send(flavor).expect(201);
   await api('post','/admin/flavor-directions',admin).send(flavor).expect(409);
   await api('patch','/admin/flavor-directions/test-flavor',admin).send({...flavor,primaryWeight:17}).expect(200);
-  expect((await api('get','/flavor-directions')).body.find((f:any)=>f.id===flavor.id).primaryWeight).toBe(17);
+  expect((await api('get','/flavor-directions')).body.find((f:any)=>f.id===flavor.id)).toMatchObject({primaryWeight:17,imageUrl:'https://cdn.example.com/flavor.webp'});
   await api('patch','/admin/flavor-directions/test-flavor',admin).send({...flavor,isActive:false}).expect(200);
   expect((await api('get','/flavor-directions')).body.find((f:any)=>f.id===flavor.id)).toBeUndefined();
   await api('delete','/admin/flavor-directions/test-flavor',admin).expect(200);

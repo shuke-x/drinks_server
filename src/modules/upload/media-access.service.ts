@@ -34,7 +34,7 @@ export class MediaAccessService {
  async assertReadable(key:string,token:unknown) {
   if(!this.key(this.canonical(key))) throw new NotFoundException('Image not found');
   const url=this.canonical(key);
-  const publicRows=await this.db.query(`SELECT 1 FROM cocktails WHERE "deletedAt" IS NULL AND "isPrivate"=false AND status='published' AND images @> $1::jsonb UNION ALL SELECT 1 FROM users WHERE "avatarUrl"=$2 LIMIT 1`,[JSON.stringify([url]),url]);
+  const publicRows=await this.db.query(`SELECT 1 FROM cocktails WHERE "deletedAt" IS NULL AND "isPrivate"=false AND status='published' AND images @> $1::jsonb UNION ALL SELECT 1 FROM users WHERE "avatarUrl"=$2 UNION ALL SELECT 1 FROM flavor_directions WHERE data->>'imageUrl'=$2 LIMIT 1`,[JSON.stringify([url]),url]);
   if(publicRows.length) return;
   const userId=this.identity(token,key);
   if(!userId) throw new NotFoundException('Image not found');

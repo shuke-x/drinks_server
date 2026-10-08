@@ -53,7 +53,7 @@ Android 模拟器把主机地址改为 `10.0.2.2`；真机使用开发电脑局�
 
 记录请求字段：`id,name,occurredAt,scene(home/out),verdict(loved/liked/notForMe),actualRecipe`；可选 `note,venue,price,adjustments,photoBase64,reference`。后台新增/更新另需 `ownerId`，路由 ID 与请求 ID 必须一致。`actualRecipe` 每项为 `{n,ml}` 或 `{n,t}`。照片最大 2 MB，采用规范 Base64 JPEG/PNG/WebP，请求最大 3 MB。参考配方为历史快照，不修改公共原配方。
 
-风味请求字段：`id,zh,en,zhSubtitle,enSubtitle,keywords,color,icon,primaryWeight,secondaryWeight,isActive,sortOrder`。同一关键词优先命中风味/标签，否则命中酒名/基酒；分数相同保留原始顺序。停用与删除风味不会再出现在新加载的 App 列表。
+风味请求字段：`id,zh,en,zhSubtitle,enSubtitle,keywords,color,imageUrl,icon,primaryWeight,secondaryWeight,isActive,sortOrder`。`imageUrl` 为可选的 HTTP(S) 封面 URL，由管理端通过图片上传接口取得。同一关键词优先命中风味/标签，否则命中酒名/基酒；分数相同保留原始顺序。停用与删除风味不会再出现在新加载的 App 列表。
 
 ## App 同步行为
 

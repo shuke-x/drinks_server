@@ -28,6 +28,17 @@ export class RedisService {
     )) as string | null;
     return value ? (JSON.parse(value) as T) : null;
   }
+  /** Atomically consume a one-time code only if its stored digest matches. */
+  async consumeMatchingHash(key: string, digest: string): Promise<boolean> {
+    const result = await this.client.eval(
+      "local v=redis.call('GET',KEYS[1]); if not v then return 0 end; local d=cjson.decode(v); if d.digest==ARGV[1] then redis.call('DEL',KEYS[1]); return 1 end; return 0",
+      1,
+      key,
+      digest,
+    );
+    return Number(result) === 1;
+  }
+
   /** SET NX makes request-id replay protection safe across API instances. */
   async setIfAbsent(
     key: string,

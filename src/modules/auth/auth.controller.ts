@@ -8,6 +8,7 @@ import {
 } from "@nestjs/swagger";
 import { AuthService } from "./auth.service";
 import { EncryptedAuthDto } from "./dto/encrypted-auth.dto";
+import { RegistrationCodeDto } from "./dto/registration-code.dto";
 import { RefreshDto } from "./dto/refresh.dto";
 import { RateLimit } from "../../common/security/rate-limit.decorator";
 import { RedisRateLimitGuard } from "../../common/security/redis-rate-limit.guard";
@@ -34,6 +35,16 @@ export class AuthController {
   })
   challenge() {
     return this.auth.createChallenge();
+  }
+
+  @Post("registration-code")
+  @RateLimit({ scope: "auth-registration-code", limit: 10, windowSeconds: 15 * 60 })
+  @UseGuards(RedisRateLimitGuard)
+  @ApiOperation({ summary: "发送注册邮箱验证码" })
+  @ApiBody({ type: RegistrationCodeDto })
+  @ApiOkResponse({ description: "验证码已发送到注册邮箱。" })
+  registrationCode(@Body() dto: RegistrationCodeDto) {
+    return this.auth.sendRegistrationCode(dto.email);
   }
 
   @Get("me")

@@ -3,6 +3,9 @@ import {
   ConflictException,
   Injectable,
   UnauthorizedException,
+  ServiceUnavailableException,
+  HttpException,
+  HttpStatus,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
@@ -14,6 +17,7 @@ import {
   createPublicKey,
   privateDecrypt,
   randomBytes,
+  randomInt,
   randomUUID,
 } from "crypto";
 import { Repository } from "typeorm";
@@ -91,12 +95,91 @@ export class AuthService {
       expiresAt: expiresAt.toISOString(),
     };
   }
+  async sendRegistrationCode(rawEmail: string) {
+    const email = rawEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException("Enter a valid email address");
+    }
+    const resendKey = this.config.get<string>("RESEND_API_KEY")?.trim();
+    const from = this.config.get<string>("AUTH_EMAIL_FROM")?.trim();
+    if (!resendKey || !from) {
+      throw new ServiceUnavailableException("Email delivery is not configured");
+    }
+    if (await this.users.exists({ where: { email } })) {
+      throw new ConflictException("Email is already registered");
+    }
+
+    const emailHash = this.hash(email);
+    const cooldownKey = `auth:registration-code:cooldown:${emailHash}`;
+    if (!(await this.redis.setIfAbsent(cooldownKey, true, 60))) {
+      throw new HttpException("Wait before requesting another code", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    const codeKey = `auth:registration-code:${emailHash}`;
+    await this.redis.withTTL(
+      codeKey,
+      { digest: this.registrationCodeDigest(email, code) },
+      600,
+    );
+
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from,
+          to: [email],
+          subject: "Your Tonight Drinks registration code",
+          text: `Your registration code is ${code}. It expires in 10 minutes.`,
+          html: `<p>Your Tonight Drinks registration code is <strong>${code}</strong>.</p><p>It expires in 10 minutes. If you did not request it, ignore this email.</p>`,
+        }),
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!response.ok) throw new Error("Email provider rejected the request");
+    } catch {
+      await this.redis.del(codeKey);
+      await this.redis.del(cooldownKey);
+      throw new ServiceUnavailableException("Email could not be sent. Try again later.");
+    }
+    return { sent: true };
+  }
+
+  private async consumeRegistrationCode(email: string, code: string | undefined) {
+    if (!code || !/^\d{6}$/.test(code)) {
+      throw new BadRequestException("Enter the 6-digit email code");
+    }
+    const emailHash = this.hash(email);
+    const attemptsKey = `auth:registration-code:attempts:${emailHash}`;
+    const attempts = await this.redis.incrementWithTTL(attemptsKey, 600);
+    if (attempts.count > 5) {
+      throw new HttpException("Too many code attempts. Request a new code.", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const accepted = await this.redis.consumeMatchingHash(
+      `auth:registration-code:${emailHash}`,
+      this.registrationCodeDigest(email, code),
+    );
+    if (!accepted) {
+      throw new BadRequestException("Email code is invalid or expired");
+    }
+    await this.redis.del(attemptsKey);
+  }
+
+  private registrationCodeDigest(email: string, code: string) {
+    return createHmac("sha256", this.jwtSecret)
+      .update(`${email}:${code}`)
+      .digest("hex");
+  }
+
   async register(challengeId: string, ciphertext: string) {
     const payload = await this.consumeCredentials(challengeId, ciphertext);
     const email = payload.email.trim().toLowerCase();
     if (await this.users.exists({ where: { email } }))
       throw new ConflictException("Email is already registered");
     this.assertPassword(payload.password);
+    await this.consumeRegistrationCode(email, payload.code);
     const user = await this.users.save(
       this.users.create({
         email,

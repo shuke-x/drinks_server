@@ -34,6 +34,7 @@ export class FlavorDto {
  @IsArray() @ArrayMaxSize(80) @IsString({each:true}) @Length(1,50,{each:true}) keywords!: string[];
  @IsIn(['fresh','sweet_sour','fruit','tea','rich']) icon!: string;
  @Matches(/^#[0-9a-fA-F]{6}$/) color!: string;
+ @IsOptional() @IsString() @MaxLength(2048) @Matches(/^https?:\/\/\S+$/i) imageUrl?: string | null;
  @IsInt() @Min(0) @Max(100) primaryWeight!: number;
  @IsInt() @Min(0) @Max(100) secondaryWeight!: number;
  @IsInt() @Min(0) @Max(10000) sortOrder!: number;
